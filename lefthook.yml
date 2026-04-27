@@ -1,0 +1,29 @@
+pre-commit:
+  parallel: true
+  commands:
+    prettier:
+      glob: "*.{ts,js,svelte,json,md,yml,yaml,html,css}"
+      exclude:
+        - pnpm-lock.yaml
+        - "src/lib/ipc/**"
+      run: pnpm exec prettier --check {staged_files}
+      stage_fixed: true
+
+    eslint:
+      glob: "src/**/*.{ts,js,svelte}"
+      exclude:
+        - "src/lib/ipc/**"
+      run: pnpm exec eslint {staged_files}
+
+    svelte-check:
+      glob: "src/**/*.{ts,svelte}"
+      run: pnpm exec svelte-check --tsconfig ./tsconfig.json --threshold warning
+
+# Rust hooks intentionally not pre-commit on Windows — `bash -c` quoting
+# inside the YAML run field breaks lefthook's shell wrapper. CI runs
+# `cargo fmt --check` and `cargo clippy --features test-fakes -D warnings`
+# on every PR (see .github/workflows/lint.yml). Once Rust is installed
+# locally, contributors can run `pnpm check:rust` before committing.
+#
+# Conventional Commits are enforced via PR title check on GitHub
+# (see DECISIONS.md ADR-006).
