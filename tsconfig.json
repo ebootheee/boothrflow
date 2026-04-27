@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "$lib": ["src/lib"],
+      "$lib/*": ["src/lib/*"],
+      "$ipc": ["src/lib/ipc"],
+      "$ipc/*": ["src/lib/ipc/*"]
+    },
+
+    "allowJs": true,
+    "checkJs": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.svelte",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "svelte.config.js",
+    "eslint.config.js"
+  ],
+  "exclude": ["node_modules", "dist", "build", "src-tauri", "_spike"]
+}

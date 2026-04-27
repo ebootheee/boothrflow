@@ -1,0 +1,2 @@
+# Generated specta TypeScript bindings land here at build time.
+# Run `pnpm gen` (delegates to `cargo run --bin gen-bindings`) after editing Rust types.

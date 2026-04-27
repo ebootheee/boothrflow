@@ -1,0 +1,10 @@
+node_modules
+dist
+build
+.svelte-kit
+src-tauri/target
+src-tauri/gen
+_spike
+src/lib/ipc
+*.lock
+pnpm-lock.yaml
