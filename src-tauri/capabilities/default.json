@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities granted to the main webview window in v0.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "store:default",
+    "log:default",
+    "os:default",
+    "process:default",
+    "clipboard-manager:default",
+    "global-shortcut:default",
+    "autostart:default",
+    "notification:default",
+    "dialog:default",
+    "fs:default"
+  ]
+}

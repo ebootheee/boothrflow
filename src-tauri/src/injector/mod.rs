@@ -1,0 +1,19 @@
+//! Text injection.
+//!
+//! Production uses a hybrid strategy (clipboard + SendInput Ctrl+V, falling
+//! back to enigo typing or UI Automation `SetValue`). The trait abstracts the
+//! "put this text into the focused control" goal so tests can verify behavior
+//! without touching the OS clipboard or simulating keystrokes on CI.
+
+use crate::error::Result;
+
+pub trait Injector: Send + Sync {
+    fn inject(&self, text: &str) -> Result<()>;
+
+    fn name(&self) -> &str;
+}
+
+#[cfg(any(test, feature = "test-fakes"))]
+pub mod fake;
+#[cfg(any(test, feature = "test-fakes"))]
+pub use fake::RecordingInjector;
