@@ -1,0 +1,95 @@
+# Spike clones — for local reference only, never committed
+_spike/
+
+# Models — downloaded at first run, never committed
+models/
+*.gguf
+*.onnx
+!**/fixtures/audio/*.onnx        # except tiny test models if any
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock                        # tracked in src-tauri/, ignored elsewhere
+!src-tauri/Cargo.lock
+
+# Node / pnpm
+node_modules/
+.pnpm-store/
+.pnpm-debug.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# Build outputs
+dist/
+build/
+out/
+.svelte-kit/
+.turbo/
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/gen/schemas/
+src-tauri/WixTools/
+src-tauri/binaries/
+
+# Test artifacts
+coverage/
+lcov.info
+.nyc_output/
+playwright-report/
+test-results/
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Insta
+**/*.snap.new
+
+# Claude / agent local state
+.claude/local/
+
+# Codesigning artifacts (NEVER commit private keys)
+*.p12
+*.pfx
+*.cer
+*.key
+TauriSigningKey
+TauriSigningKey.pub
+
+# OS-specific build temp
+*.dmg
+*.msi
+*.exe
+*.AppImage
+*.deb
+*.rpm
+*.pkg
+!/scripts/**/*.exe   # tooling we vendor (none yet)
+
+# Profiling
+*.profraw
+flamegraph.svg
+perf.data*

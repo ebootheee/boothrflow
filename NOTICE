@@ -1,0 +1,61 @@
+boothrflow
+Copyright 2026 Eric Boothe and boothrflow contributors
+
+Licensed under the Apache License, Version 2.0 (the "License").
+See LICENSE for the full text.
+
+This product includes software and models developed by third parties:
+
+──────────────────────────────────────────────────────────────────────
+Models
+──────────────────────────────────────────────────────────────────────
+
+NVIDIA Parakeet-TDT 0.6B v3
+  https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+  License: CC-BY-4.0
+  Citation: Paper arXiv:2509.14128 (NVIDIA, 2025)
+
+OpenAI Whisper (large-v3-turbo, distil-large-v3.5)
+  https://huggingface.co/openai/whisper-large-v3-turbo
+  https://huggingface.co/distil-whisper/distil-large-v3.5
+  License: MIT (OpenAI), MIT (Distil-Whisper, HuggingFace)
+
+Qwen 2.5 3B Instruct
+  https://huggingface.co/Qwen/Qwen2.5-3B-Instruct
+  License: Apache-2.0
+
+BAAI bge-small-en-v1.5
+  https://huggingface.co/BAAI/bge-small-en-v1.5
+  License: MIT
+
+Silero VAD
+  https://github.com/snakers4/silero-vad
+  License: MIT
+
+TEN-VAD
+  https://github.com/TEN-framework/ten-vad
+  License: Apache-2.0
+
+──────────────────────────────────────────────────────────────────────
+Test fixtures
+──────────────────────────────────────────────────────────────────────
+
+LibriSpeech (selected dev-clean clips, trimmed)
+  https://www.openslr.org/12
+  License: CC-BY-4.0
+
+──────────────────────────────────────────────────────────────────────
+Patterns adopted from
+──────────────────────────────────────────────────────────────────────
+
+cjpais/Handy (MIT) — STT abstraction approach via transcribe-rs,
+  VK-code paste pattern, manager-per-domain layout.
+  https://github.com/cjpais/Handy
+
+EpicenterHQ/epicenter "whispering" (AGPL-3.0) — three-layer frontend
+  architecture (Service / Query / UI), build-time platform detection.
+  Patterns referenced for design only; no code copied verbatim.
+  https://github.com/EpicenterHQ/epicenter
+
+For a full third-party dependency list, see Cargo.lock and pnpm-lock.yaml,
+and run `cargo deny check licenses` to enumerate compatible licenses.
