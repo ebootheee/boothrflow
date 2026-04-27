@@ -19,7 +19,9 @@ impl ScriptedHotkey {
     }
 
     pub fn next(&self) -> Option<HotkeyEvent> {
-        let i = self.cursor.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let i = self
+            .cursor
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.events.get(i).copied()
     }
 }

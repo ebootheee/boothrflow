@@ -24,7 +24,7 @@
     "build:vite": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "gen": "cd src-tauri && cargo run --bin gen-bindings --no-default-features --features test-fakes",
+    "gen": "echo 'tauri-specta + bindings generation lands in Phase 1 W3 — see DECISIONS.md ADR-007' && exit 0",
     "test": "pnpm run /^test:(fe|rust)$/",
     "test:fe": "vitest run",
     "test:fe:watch": "vitest",

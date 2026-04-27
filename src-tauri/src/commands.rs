@@ -22,7 +22,6 @@ pub struct DictateResult {
 }
 
 #[tauri::command]
-#[specta::specta]
 pub async fn dictate_once(style: Style) -> Result<DictateResult, BoothError> {
     // v0: still using fakes end-to-end. When real engines are wired in, this
     // body becomes the only place that swaps the trait objects.

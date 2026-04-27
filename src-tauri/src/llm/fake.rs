@@ -19,12 +19,23 @@ impl LlmCleanup for FakeLlmCleanup {
 }
 
 fn strip_fillers(input: &str) -> String {
-    const FILLERS: &[&str] = &["uh", "um", "like", "basically", "you know"];
-    input
-        .split_whitespace()
+    const MULTI_WORD: &[&str] = &["you know"];
+    const SINGLE_WORD: &[&str] = &["uh", "um", "like", "basically"];
+
+    // Multi-word fillers first — remove substring case-insensitively so that
+    // "you know" is dropped before single-word filtering sees its tokens.
+    let mut text = input.to_string();
+    for filler in MULTI_WORD {
+        while let Some(idx) = text.to_lowercase().find(filler) {
+            text.replace_range(idx..idx + filler.len(), "");
+        }
+    }
+
+    // Then single-word filtering, ignoring trailing punctuation.
+    text.split_whitespace()
         .filter(|word| {
             let lower = word.to_lowercase();
-            !FILLERS.contains(&lower.trim_end_matches(|c: char| !c.is_alphanumeric()))
+            !SINGLE_WORD.contains(&lower.trim_end_matches(|c: char| !c.is_alphanumeric()))
         })
         .collect::<Vec<_>>()
         .join(" ")

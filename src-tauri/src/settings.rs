@@ -1,19 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum Style {
     Raw,
     Formal,
+    #[default]
     Casual,
     Excited,
     VeryCasual,
-}
-
-impl Default for Style {
-    fn default() -> Self {
-        Self::Casual
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

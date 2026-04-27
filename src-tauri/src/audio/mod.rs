@@ -28,7 +28,6 @@ pub mod fake;
 #[cfg(any(test, feature = "test-fakes"))]
 pub use fake::FakeAudioSource;
 
-#[cfg(feature = "real-engines")]
-pub mod cpal_source;
-#[cfg(feature = "real-engines")]
-pub use cpal_source::CpalAudioSource;
+// `real-engines` impl (cpal WASAPI shared mode + rubato resample) lands
+// in Phase 1 W1. Until then no production AudioSource exists; the fake
+// covers tests + the v0 demo command.

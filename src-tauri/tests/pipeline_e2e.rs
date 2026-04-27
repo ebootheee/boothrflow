@@ -38,14 +38,20 @@ fn full_pipeline_runs_with_fakes() {
     assert_eq!(outcome.app_exe.as_deref(), Some("slack.exe"));
 }
 
+// Input is intentionally >= 6 words so `should_skip_llm` lets the LLM run.
+// Update both `RAW_INPUT` and the per-style expectations together if either
+// the threshold (`should_skip_llm`) or the FakeLlmCleanup behavior changes.
+const RAW_INPUT: &str = "this is another regular test sentence";
+
 #[rstest::rstest]
-#[case(Style::Raw, "uh hi there")]
-#[case(Style::Formal, "Hi there.")]
-#[case(Style::Excited, "Hi there!")]
-#[case(Style::VeryCasual, "hi there")]
+#[case(Style::Raw, "this is another regular test sentence")]
+#[case(Style::Formal, "This is another regular test sentence.")]
+#[case(Style::Casual, "this is another regular test sentence")]
+#[case(Style::Excited, "This is another regular test sentence!")]
+#[case(Style::VeryCasual, "this is another regular test sentence")]
 fn style_shapes_output(#[case] style: Style, #[case] expected: &str) {
     let audio = FakeAudioSource::silence(0.5);
-    let stt = FakeSttEngine::canned("uh hi there");
+    let stt = FakeSttEngine::canned(RAW_INPUT);
     let llm = FakeLlmCleanup;
     let injector = RecordingInjector::new();
     let context = FixedContextDetector::none();
@@ -58,9 +64,6 @@ fn style_shapes_output(#[case] style: Style, #[case] expected: &str) {
         context: &context,
     };
 
-    // 3 words → would normally skip the LLM (< 6 word threshold). Force-enable
-    // by passing extra context: tweak the canned text below if `should_skip_llm`
-    // ever changes its threshold.
     let outcome = pipeline.dictate_once(style, true).unwrap();
     assert_eq!(outcome.formatted, expected);
 }

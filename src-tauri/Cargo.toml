@@ -19,11 +19,6 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "boothrflow"
 path = "src/main.rs"
 
-[[bin]]
-name = "gen-bindings"
-path = "src/bin/gen_bindings.rs"
-required-features = ["test-fakes"]
-
 # ──────────────────────────────────────────────────────────────────────────
 # Features
 #
@@ -56,7 +51,6 @@ tauri = { version = "2", features = [
   "tray-icon",
   "macos-private-api",
   "image-png",
-  "protocol-asset",
 ] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
@@ -68,10 +62,10 @@ tauri-plugin-os = "2"
 tauri-plugin-process = "2"
 tauri-plugin-store = "2"
 
-# Specta for Rust ↔ TS type bindings
-specta = "=2.0.0-rc.22"
-specta-typescript = "0.0.9"
-tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
+# Specta — the `Type` derive only. The full tauri-specta integration
+# (typed commands + auto-generated TS bindings) lands in Phase 1 W3
+# when we have enough commands to make it worthwhile.
+specta = { version = "=2.0.0-rc.22", features = ["derive"] }
 
 # Foundations
 anyhow = "1"
