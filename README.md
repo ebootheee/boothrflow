@@ -17,13 +17,13 @@ See [`DECISIONS.md`](./DECISIONS.md) for ADRs.
 
 ## Status
 
-| Area                         | Status      |
-| ---------------------------- | ----------- |
-| Plan + ADRs                  | Done        |
-| Scaffold                     | In progress |
-| Hot path (mic → STT → paste) | Not started |
-| LLM cleanup                  | Not started |
-| Memory / history             | Not started |
+| Area                         | Status                              |
+| ---------------------------- | ----------------------------------- |
+| Plan + ADRs (12 ADRs)        | Done                                |
+| Scaffold + green test suite  | Done — 17 Rust + 7 FE tests passing |
+| Hot path (mic → STT → paste) | Not started — Phase 1 W1            |
+| LLM cleanup                  | Fakes wired; real engine Phase 2 W4 |
+| Memory / history             | Not started — Phase 3 W7            |
 
 ## Prerequisites (developers)
 

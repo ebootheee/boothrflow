@@ -262,6 +262,24 @@ Errors flow up via `Result<T, E>` until the query layer, where they're either au
 
 ---
 
+## ADR-012 — v0 scope deferrals
+
+**Status:** Accepted, 2026-04-27.
+
+**Context.** First `cargo check` and `pnpm check` on a fresh Windows install surfaced a handful of integration friction points. Resolving each properly would have stretched the v0 scaffold into v0.2 territory. Deferring them lets the spine ship today.
+
+**Decision.** The following are deferred and tracked here so we don't lose the thread:
+
+1. **tauri-specta + auto TS bindings (was ADR-007, target Phase 1 W3).** Cross-binary macro resolution (`__cmd__*`, `__specta__fn__*`) is finicky between `lib.rs` and a sibling `bin/`. The canonical fix is to hoist the `specta_builder()` into `lib.rs` and have the bin call it; we do that when we have ≥ 2 commands and the typed-binding payoff is concrete. Until then `specta::Type` derives stay (so payload types are documented) and the frontend talks to Rust through plain `invoke<T>()` calls with manually-mirrored types.
+2. **Vitest browser-mode component tests.** `vitest-browser-svelte 0.1.0` predates Svelte 5 runes; the upstream API churns. Component tests via `render(...).getByTestId(...).toContainText(...)` were drafted then deleted. The infrastructure (vitest project for `*.svelte.test.ts` + `@vitest/browser` + `playwright` Chromium) is wired and ready; we just don't ship a passing component test until vitest-browser-svelte 2.x stabilises.
+3. **Lefthook Rust pre-commit hooks.** Lefthook's YAML `run:` field on Windows can't reliably wrap commands in `bash -c '...'` because of shell-quoting interactions. We dropped `cargo fmt --check` and `cargo clippy` from pre-commit. CI still gates on them via GitHub Actions. Local contributors run `pnpm check:rust` manually.
+4. **Local commit-msg hook for Conventional Commits.** Same shell-quoting problem on Windows. We enforce the convention via PR title (planned GitHub Action), not via lefthook.
+5. **`tauri.conf.json` `protocol-asset`.** Removed for v0; re-add when we serve images/audio from app-managed paths (likely Phase 3 for history audio playback).
+
+**Consequences.** v0 ships with a smaller surface than ADR-005/007 envisioned. The traits and CI gates that matter most are in place. Each deferred item has a known re-enable path tracked in this ADR; if any becomes blocking earlier than its target Phase, append a Reverse ADR.
+
+---
+
 ## How to add a new ADR
 
 1. Append below the last one with the next number.
