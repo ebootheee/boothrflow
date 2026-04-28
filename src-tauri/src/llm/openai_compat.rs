@@ -82,6 +82,43 @@ impl OpenAiCompatLlmCleanup {
     pub fn model(&self) -> &str {
         &self.model
     }
+
+    /// Send a tiny dummy request so the backend loads the model into VRAM
+    /// before the user's first dictation. Failures are silently logged —
+    /// the daemon will still try the real call when the user dictates.
+    pub fn prewarm(&self) {
+        let body = ChatRequest {
+            model: &self.model,
+            messages: [
+                ChatMessage {
+                    role: "system",
+                    content: "respond with the word 'ok'",
+                },
+                ChatMessage {
+                    role: "user",
+                    content: "warmup",
+                },
+            ],
+            temperature: 0.0,
+            stream: false,
+        };
+        let started = Instant::now();
+        let mut req = self.client.post(&self.endpoint).json(&body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        match req.send() {
+            Ok(res) if res.status().is_success() => {
+                tracing::info!(
+                    "llm prewarm: {} ms (endpoint={})",
+                    started.elapsed().as_millis(),
+                    self.endpoint
+                );
+            }
+            Ok(res) => tracing::warn!("llm prewarm: http {}", res.status()),
+            Err(e) => tracing::warn!("llm prewarm failed: {e}"),
+        }
+    }
 }
 
 #[derive(Serialize)]

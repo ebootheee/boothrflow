@@ -32,9 +32,19 @@ pub const DEFAULT_MODEL_FILE: &str = "ggml-tiny.en.bin";
 pub const DEFAULT_MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin";
 
+/// Generic English tech-vocab seed prompt — biases Whisper toward
+/// recognising common domain words and proper nouns. Override with
+/// `BOOTHRFLOW_WHISPER_PROMPT` env var for per-user vocabulary.
+const DEFAULT_INITIAL_PROMPT: &str =
+    "The transcript may include the following terms: Claude, Claude Code, GPT, OpenAI, \
+     Anthropic, Ollama, Tauri, Rust, TypeScript, Svelte, GitHub, kubectl, Kubernetes, \
+     Docker, latency, throughput, async, await, refactor, repository, debugger, \
+     middleware, schema, deploy, payload, monorepo, namespace.";
+
 pub struct WhisperSttEngine {
     context: Arc<WhisperContext>,
     name: String,
+    initial_prompt: Option<String>,
 }
 
 impl WhisperSttEngine {
@@ -60,19 +70,40 @@ impl WhisperSttEngine {
                     ))
                 })?;
 
+        // Resolve initial_prompt from env var, default seed, or empty.
+        let initial_prompt = match std::env::var("BOOTHRFLOW_WHISPER_PROMPT") {
+            Ok(s) if s.is_empty() => None,
+            Ok(s) => Some(s),
+            Err(_) => Some(DEFAULT_INITIAL_PROMPT.to_string()),
+        };
+
         Ok(Self {
             context: Arc::new(context),
             name: name.into(),
+            initial_prompt,
         })
     }
 
-    /// Try to load the default model (`ggml-tiny.en.bin`) from the standard
-    /// per-user models directory.
+    /// Try to load the default model from the standard per-user models
+    /// directory. Honors `BOOTHRFLOW_WHISPER_MODEL_FILE` for swapping
+    /// tiny → base / small / large-v3-turbo without recompile.
     pub fn from_default_location() -> Result<Self> {
-        let path = default_model_path().ok_or_else(|| {
-            BoothError::Transcription("could not resolve user data directory".into())
-        })?;
-        Self::from_path(&path, "whisper-tiny.en")
+        let file = std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE")
+            .unwrap_or_else(|_| DEFAULT_MODEL_FILE.to_string());
+
+        let path = default_models_dir()
+            .ok_or_else(|| {
+                BoothError::Transcription("could not resolve user data directory".into())
+            })?
+            .join(&file);
+
+        // Use the file stem as the engine name ("ggml-small.en" etc.).
+        let name = std::path::Path::new(&file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("whisper")
+            .to_string();
+        Self::from_path(&path, name)
     }
 }
 
@@ -108,6 +139,13 @@ impl SttEngine for WhisperSttEngine {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_suppress_blank(true);
+
+        // initial_prompt biases Whisper toward the supplied vocabulary.
+        // Capped at 224 tokens by whisper.cpp; stays in scope for the
+        // first 30s segment then is overwritten by rolling decode history.
+        if let Some(prompt) = &self.initial_prompt {
+            params.set_initial_prompt(prompt);
+        }
 
         state
             .full(params, audio)
@@ -157,7 +195,9 @@ impl SttEngine for SerializedWhisperSttEngine {
 }
 
 pub fn default_model_path() -> Option<PathBuf> {
-    dirs::data_dir().map(|d| d.join("boothrflow").join("models").join(DEFAULT_MODEL_FILE))
+    let file = std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE")
+        .unwrap_or_else(|_| DEFAULT_MODEL_FILE.to_string());
+    default_models_dir().map(|d| d.join(file))
 }
 
 pub fn default_models_dir() -> Option<PathBuf> {

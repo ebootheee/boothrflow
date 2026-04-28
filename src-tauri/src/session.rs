@@ -91,6 +91,24 @@ mod real {
                     engine.endpoint(),
                     engine.model()
                 );
+                // Pre-warm in a background thread so the first user dictation
+                // doesn't pay the model-load tax (typically 3-5s the first
+                // time Ollama touches a freshly-pulled model).
+                let prewarm_endpoint = engine.endpoint().to_string();
+                let prewarm_model = engine.model().to_string();
+                let prewarm_key = std::env::var("BOOTHRFLOW_LLM_API_KEY").ok();
+                std::thread::Builder::new()
+                    .name("boothrflow-llm-prewarm".into())
+                    .spawn(move || {
+                        if let Ok(warm) = OpenAiCompatLlmCleanup::new(
+                            prewarm_endpoint,
+                            prewarm_model,
+                            prewarm_key,
+                        ) {
+                            warm.prewarm();
+                        }
+                    })
+                    .ok();
                 Some(engine)
             }
             Some(Err(e)) => {
