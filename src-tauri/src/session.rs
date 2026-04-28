@@ -21,8 +21,10 @@ mod real {
 
     use crate::audio::{AudioFrame, AudioSource, CpalAudioSource};
     use crate::hotkey::{HotkeyEvent, HotkeySource, RdevHotkeySource};
+    use crate::injector::{ClipboardInjector, Injector};
     use crate::overlay;
     use crate::stt::{SttEngine, SttResult, WhisperSttEngine};
+    use crate::tray;
 
     #[derive(Debug, Clone, Serialize)]
     struct DictationSummary {
@@ -65,10 +67,27 @@ mod real {
             }
         };
 
+        // Injector. ClipboardInjector init failure is rare (would mean
+        // OS-level clipboard access denied); we still keep the daemon
+        // running and emit errors per-attempt.
+        let injector: Option<ClipboardInjector> = match ClipboardInjector::new() {
+            Ok(inj) => Some(inj),
+            Err(e) => {
+                tracing::error!("injector init failed: {e}");
+                let _ = app.emit("dictation:error", e.to_string());
+                None
+            }
+        };
+
         for event in hotkey_rx.iter() {
             match event {
                 HotkeyEvent::Press => {
+                    if tray::is_paused() {
+                        tracing::info!("hotkey: press ignored (paused)");
+                        continue;
+                    }
                     let _ = overlay::show(&app);
+                    tray::set_listening(&app, true);
                     let _ = app.emit("dictation:start", ());
 
                     let frame_rx = match audio.start() {
@@ -111,14 +130,14 @@ mod real {
                     );
                     let _ = app.emit("dictation:summary", &summary);
                     let _ = overlay::hide(&app);
+                    tray::set_listening(&app, false);
 
-                    // STT on the captured audio.
+                    // STT on the captured audio, then paste.
                     match &stt {
                         Some(engine) => {
-                            // Flatten frames into one contiguous PCM buffer.
                             let pcm: Vec<f32> =
                                 frames.iter().flat_map(|f| f.iter().copied()).collect();
-                            transcribe_and_emit(&app, engine, &pcm);
+                            transcribe_and_emit(&app, engine, injector.as_ref(), &pcm);
                         }
                         None => {
                             let _ = app.emit(
@@ -138,7 +157,12 @@ mod real {
         Ok(())
     }
 
-    fn transcribe_and_emit(app: &AppHandle, engine: &WhisperSttEngine, pcm: &[f32]) {
+    fn transcribe_and_emit(
+        app: &AppHandle,
+        engine: &WhisperSttEngine,
+        injector: Option<&ClipboardInjector>,
+        pcm: &[f32],
+    ) {
         match engine.transcribe(pcm) {
             Ok(result) => {
                 tracing::info!(
@@ -147,6 +171,16 @@ mod real {
                     result.text
                 );
                 emit_result(app, &result);
+
+                // Paste into the focused app if the transcript is non-empty.
+                if !result.text.is_empty() {
+                    if let Some(inj) = injector {
+                        if let Err(e) = inj.inject(&result.text) {
+                            tracing::error!("inject failed: {e}");
+                            let _ = app.emit("dictation:error", e.to_string());
+                        }
+                    }
+                }
             }
             Err(e) => {
                 tracing::error!("stt error: {e}");

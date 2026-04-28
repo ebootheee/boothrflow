@@ -26,6 +26,7 @@ pub mod pipeline;
 pub mod session;
 pub mod settings;
 pub mod stt;
+pub mod tray;
 pub mod vad;
 
 use commands::dictate_once;
@@ -53,15 +54,22 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![dictate_once])
         .setup(|app| {
+            let handle = app.handle().clone();
+
+            // System tray with Open / Pause / Quit menu.
+            if let Err(e) = tray::create_tray(&handle) {
+                tracing::warn!("could not create tray icon: {e}");
+            }
+
             // Pre-warm the listen-pill overlay so first-press latency is low.
-            if let Err(e) = overlay::create_pill_window(&app.handle().clone()) {
+            if let Err(e) = overlay::create_pill_window(&handle) {
                 tracing::warn!("could not create listen-pill window: {e}");
             }
 
             // Real-engines: spawn the hotkey daemon and bridge events to
             // Tauri's event system + the pill overlay.
             #[cfg(feature = "real-engines")]
-            session::spawn_session_daemon(app.handle().clone());
+            session::spawn_session_daemon(handle);
 
             Ok(())
         })
