@@ -15,6 +15,13 @@ export default defineConfig({
     },
   },
 
+  // Restrict Vite's dep-scan to our entry only — without this it walks the
+  // working tree (including the gitignored `_spike/` reference clones) and
+  // chokes on $lib aliases that don't resolve in our project.
+  optimizeDeps: {
+    entries: ["index.html"],
+  },
+
   // Vite options tailored for Tauri development.
   // See https://v2.tauri.app/start/frontend/vite/
   clearScreen: false,

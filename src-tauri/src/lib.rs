@@ -42,8 +42,12 @@ pub fn run() {
         .with_target(false)
         .init();
 
+    // tauri_plugin_log is intentionally not registered: we already init
+    // tracing_subscriber above as the global logger, and registering
+    // tauri-plugin-log on top panics with "logger after the logging system
+    // was already initialized". Tauri 2 emits via the `tracing` crate so
+    // its internal events flow through our subscriber anyway.
     tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
