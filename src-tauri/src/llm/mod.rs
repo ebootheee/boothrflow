@@ -25,12 +25,14 @@ pub mod fake;
 pub use fake::FakeLlmCleanup;
 
 #[cfg(feature = "real-engines")]
-pub mod llama;
+pub mod openai_compat;
 #[cfg(feature = "real-engines")]
-pub use llama::{
-    default_model_path as llama_default_model_path, LlamaCppLlmCleanup,
-    DEFAULT_MODEL_FILE as LLAMA_DEFAULT_MODEL_FILE, DEFAULT_MODEL_URL as LLAMA_DEFAULT_MODEL_URL,
-};
+pub use openai_compat::{OpenAiCompatLlmCleanup, DEFAULT_ENDPOINT, DEFAULT_MODEL};
+
+// In-process llama via llama-cpp-2 conflicts with whisper-rs-sys (both
+// statically link different ggml versions). We use the OpenAI-compatible
+// HTTP API instead — works with Ollama, llama-server, LM Studio, vLLM,
+// or any cloud BYOK provider.
 
 /// Convenience: when raw text is short or the user has LLM disabled, skip the
 /// pass entirely and pass through the raw transcript.

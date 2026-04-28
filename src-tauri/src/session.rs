@@ -22,7 +22,7 @@ mod real {
     use crate::audio::{AudioFrame, AudioSource, CpalAudioSource};
     use crate::hotkey::{HotkeyEvent, HotkeySource, RdevHotkeySource};
     use crate::injector::{ClipboardInjector, Injector};
-    use crate::llm::{should_skip_llm, CleanupRequest, LlamaCppLlmCleanup, LlmCleanup};
+    use crate::llm::{should_skip_llm, CleanupRequest, LlmCleanup, OpenAiCompatLlmCleanup};
     use crate::overlay;
     use crate::settings;
     use crate::stt::{SttEngine, SttResult, WhisperSttEngine};
@@ -77,15 +77,24 @@ mod real {
             }
         };
 
-        // LLM cleanup. Qwen 1.5B is ~1GB; load takes ~1s. Missing model is
-        // recoverable: the pipeline falls back to raw transcripts.
-        let llm: Option<LlamaCppLlmCleanup> = match LlamaCppLlmCleanup::from_default_location() {
-            Ok(engine) => {
-                tracing::info!("llm: model loaded ({})", engine.name());
+        // LLM cleanup via OpenAI-compatible HTTP. Ollama on localhost:11434
+        // by default; configurable via BOOTHRFLOW_LLM_* env vars. Failures
+        // (server down, model missing, timeout) fall back to raw transcript.
+        let llm: Option<OpenAiCompatLlmCleanup> = match OpenAiCompatLlmCleanup::from_env() {
+            None => {
+                tracing::info!("llm: disabled via BOOTHRFLOW_LLM_DISABLED");
+                None
+            }
+            Some(Ok(engine)) => {
+                tracing::info!(
+                    "llm: openai-compat HTTP (endpoint={}, model={})",
+                    engine.endpoint(),
+                    engine.model()
+                );
                 Some(engine)
             }
-            Err(e) => {
-                tracing::warn!("llm not available, falling back to raw transcripts: {e}");
+            Some(Err(e)) => {
+                tracing::warn!("llm: client init failed, falling back to raw: {e}");
                 let _ = app.emit("dictation:llm-missing", e.to_string());
                 None
             }
@@ -190,7 +199,7 @@ mod real {
     fn transcribe_and_emit(
         app: &AppHandle,
         engine: &WhisperSttEngine,
-        llm: Option<&LlamaCppLlmCleanup>,
+        llm: Option<&OpenAiCompatLlmCleanup>,
         injector: Option<&ClipboardInjector>,
         pcm: &[f32],
     ) {
@@ -243,7 +252,7 @@ mod real {
     fn run_llm_cleanup(
         raw: &str,
         style: settings::Style,
-        llm: Option<&LlamaCppLlmCleanup>,
+        llm: Option<&OpenAiCompatLlmCleanup>,
     ) -> (String, u64) {
         // Hard skips: explicit raw style, no LLM loaded, very short utterance.
         if matches!(style, settings::Style::Raw) {

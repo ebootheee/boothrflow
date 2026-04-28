@@ -25,11 +25,13 @@ git clone https://github.com/ebootheee/boothrflow
 cd boothrflow
 pnpm install
 
-# 3. Download models — works in any shell
-pnpm download:model     # whisper-tiny.en  (~75MB)
-pnpm download:llm       # qwen 1.5B Q4_K_M (~1GB, optional but recommended)
+# 3. Download the Whisper model (~75MB)
+pnpm download:model
 
-# 4. Boot
+# 4. (Optional) Set up the LLM cleanup pass via Ollama
+ollama pull qwen2.5:1.5b      # ~1GB, lives in your Ollama install
+
+# 5. Boot
 pnpm dev:msvc
 ```
 
@@ -39,17 +41,17 @@ Hold `Ctrl + Win`, speak into Notepad, release. Text pastes.
 
 ## Status
 
-| Area                                                  | Status                              |
-| ----------------------------------------------------- | ----------------------------------- |
-| Plan + 13 ADRs                                        | Done                                |
-| Scaffold + green test suite                           | Done — 22 Rust + 7 FE tests passing |
-| **P1 W1**: audio + hotkey + pill                      | Done                                |
-| **P1 W2**: VAD + Whisper STT                          | Done — needs ggml-tiny.en.bin       |
-| **P1 W3**: paste injection + tray                     | Done                                |
-| **P2 W4**: LLM cleanup (Qwen 2.5 1.5B) + style picker | Done — needs ~1GB Qwen GGUF         |
-| **P2 W5**: app-context detection                      | Next                                |
-| Memory / history                                      | Phase 3                             |
-| Mac + Linux                                           | Phase 4                             |
+| Area                                                       | Status                               |
+| ---------------------------------------------------------- | ------------------------------------ |
+| Plan + 13 ADRs                                             | Done                                 |
+| Scaffold + green test suite                                | Done — 22 Rust + 7 FE tests passing  |
+| **P1 W1**: audio + hotkey + pill                           | Done                                 |
+| **P1 W2**: VAD + Whisper STT                               | Done — needs ggml-tiny.en.bin        |
+| **P1 W3**: paste injection + tray                          | Done                                 |
+| **P2 W4**: LLM cleanup (OpenAI-compat HTTP) + style picker | Done — needs Ollama or compat server |
+| **P2 W5**: app-context detection                           | Next                                 |
+| Memory / history                                           | Phase 3                              |
+| Mac + Linux                                                | Phase 4                              |
 
 ## Documentation
 
@@ -122,6 +124,33 @@ scripts\cargo-msvc.bat pnpm exec tauri dev
 [Conventional Commits](https://www.conventionalcommits.org/). Small PRs (~200–400 LoC). Branch protection on `main` requires green CI.
 
 See [ADR-006](./DECISIONS.md#adr-006--workflow-conventional-commits-small-prs-no-stacked-pr-tooling) for the full workflow.
+
+## LLM cleanup pass
+
+The transcript is run through a small LLM (Qwen 2.5 1.5B by default) for
+punctuation, capitalization, and run-on-sentence splitting. We talk to it
+over the **OpenAI-compatible chat-completions API** so it can be backed by
+whatever you already have running:
+
+| Backend                    | Endpoint                                     | Notes                                                              |
+| -------------------------- | -------------------------------------------- | ------------------------------------------------------------------ |
+| **Ollama** (default)       | `http://localhost:11434/v1/chat/completions` | `ollama pull qwen2.5:1.5b` and you're done. GPU offload automatic. |
+| `llama-server` (llama.cpp) | `http://localhost:8080/v1/chat/completions`  | Set `BOOTHRFLOW_LLM_ENDPOINT`                                      |
+| LM Studio                  | `http://localhost:1234/v1/chat/completions`  | same                                                               |
+| OpenAI / Anthropic / Groq  | their cloud URL                              | set `BOOTHRFLOW_LLM_API_KEY` (BYOK)                                |
+
+Override defaults with environment variables:
+
+```
+BOOTHRFLOW_LLM_ENDPOINT=http://localhost:11434/v1/chat/completions
+BOOTHRFLOW_LLM_MODEL=qwen2.5:1.5b
+BOOTHRFLOW_LLM_API_KEY=...                  # only for cloud
+BOOTHRFLOW_LLM_DISABLED=1                   # skip cleanup entirely
+```
+
+If the LLM server is down or the model isn't loaded, the pipeline falls
+back to the raw Whisper transcript with a `tracing::warn` — you stay
+unblocked even when the LLM isn't available.
 
 ## License
 
