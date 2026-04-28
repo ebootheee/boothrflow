@@ -32,7 +32,7 @@
     "test:fe:watch": "vitest",
     "test:fe:browser": "vitest run --project component",
     "test:rust": "cd src-tauri && cargo nextest run --no-default-features --features test-fakes",
-    "test:rust:real": "scripts\\cargo-msvc.bat -C src-tauri nextest run --features real-engines",
+    "test:rust:real": "scripts\\cargo-msvc.bat cargo nextest run --manifest-path src-tauri/Cargo.toml --features real-engines",
     "test:rust:doc": "cd src-tauri && cargo test --doc --no-default-features --features test-fakes",
     "test:e2e": "playwright test",
     "check": "pnpm check:types && pnpm check:lint && pnpm check:format && pnpm check:rust",

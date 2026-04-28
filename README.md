@@ -101,11 +101,12 @@ winget install Microsoft.VisualStudio.2022.BuildTools     # MSVC + Win SDK
 winget install LLVM.LLVM                                   # libclang for bindgen
 ```
 
-Then any cargo command via the wrapper:
+Then any tool via the wrapper:
 
 ```bat
-scripts\cargo-msvc.bat build --features real-engines
-scripts\cargo-msvc.bat nextest run --features real-engines
+scripts\cargo-msvc.bat cargo build --features real-engines
+scripts\cargo-msvc.bat cargo nextest run --features real-engines
+scripts\cargo-msvc.bat pnpm exec tauri dev
 ```
 
 `pnpm dev:msvc`, `pnpm build:msvc`, `pnpm test:rust:real` use the wrapper. The fast inner-loop fakes-only path (`pnpm test:rust`, `pnpm test:fe`) works in any shell because `test-fakes` doesn't compile the heavy native deps.

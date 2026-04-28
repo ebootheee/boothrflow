@@ -1,5 +1,7 @@
 @echo off
-:: Cargo wrapper that pre-loads the MSVC + Windows SDK + LLVM environment.
+:: Generic wrapper that pre-loads the MSVC + Windows SDK + LLVM environment,
+:: then runs whatever command was passed. Works with any tool that needs
+:: bindgen / libclang access — cargo, pnpm, npx, raw exes.
 ::
 :: bindgen-using crates (whisper-rs, sherpa-rs, llama-cpp-2) need libclang to
 :: parse C headers, and libclang needs INCLUDE/LIB env vars pointing at the
@@ -12,8 +14,9 @@
 ::   winget install LLVM.LLVM
 ::
 :: Usage:
-::   scripts\cargo-msvc.bat build --features real-engines
-::   scripts\cargo-msvc.bat nextest run --features real-engines
+::   scripts\cargo-msvc.bat cargo build --features real-engines
+::   scripts\cargo-msvc.bat cargo nextest run --features real-engines
+::   scripts\cargo-msvc.bat pnpm exec tauri dev
 
 setlocal
 
@@ -51,5 +54,6 @@ if not defined VCVARS (
 call "%VCVARS%" >nul 2>&1
 set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
 
-cargo %*
+:: Forward whatever command was passed (cargo build, pnpm exec tauri dev, etc.)
+%*
 exit /b %ERRORLEVEL%
