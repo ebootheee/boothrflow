@@ -20,15 +20,15 @@ winget install Microsoft.VisualStudio.2022.BuildTools
 winget install LLVM.LLVM
 winget install OpenJS.NodeJS
 
-# 2. Download the Whisper model (~75MB)
-$dest = "$env:APPDATA\boothrflow\models\ggml-tiny.en.bin"
-New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
-Invoke-WebRequest "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin" -OutFile $dest
-
-# 3. Clone + boot
+# 2. Clone + install JS deps
 git clone https://github.com/ebootheee/boothrflow
 cd boothrflow
 pnpm install
+
+# 3. Download the Whisper model (~75MB) — works in any shell
+pnpm download:model
+
+# 4. Boot
 pnpm dev:msvc
 ```
 
