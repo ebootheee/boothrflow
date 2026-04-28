@@ -13,8 +13,12 @@ use crate::error::Result;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 pub enum HotkeyEvent {
+    /// Push-to-talk dictation hotkey pressed (Ctrl+Meta default).
     Press,
+    /// PTT released.
     Release,
+    /// Quick-paste palette toggle (Alt+Meta+H default). Tap, not hold.
+    QuickPasteOpen,
 }
 
 /// Source of hotkey events. Tests use [`ScriptedHotkey`]; production uses

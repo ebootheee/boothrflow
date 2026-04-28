@@ -18,11 +18,13 @@ pub mod audio;
 pub mod commands;
 pub mod context;
 pub mod error;
+pub mod history;
 pub mod hotkey;
 pub mod injector;
 pub mod llm;
 pub mod overlay;
 pub mod pipeline;
+pub mod quickpaste;
 pub mod session;
 pub mod settings;
 pub mod stt;
@@ -30,6 +32,16 @@ pub mod tray;
 pub mod vad;
 
 use commands::{dictate_once, set_dictation_style};
+#[cfg(feature = "real-engines")]
+use tauri::Manager;
+
+#[cfg(feature = "real-engines")]
+use commands::{
+    history_clear, history_delete, history_paste, history_recent, history_search, history_stats,
+    quickpaste_close, quickpaste_paste,
+};
+#[cfg(feature = "real-engines")]
+use std::sync::Arc;
 
 /// Entry point invoked from `main.rs`. Wires Tauri plugins, registers commands,
 /// and starts the runtime.
@@ -47,7 +59,16 @@ pub fn run() {
     // tauri-plugin-log on top panics with "logger after the logging system
     // was already initialized". Tauri 2 emits via the `tracing` crate so
     // its internal events flow through our subscriber anyway.
-    tauri::Builder::default()
+    #[cfg(feature = "real-engines")]
+    let history = match history::HistoryStore::open_default() {
+        Ok(h) => Some(Arc::new(h)),
+        Err(e) => {
+            tracing::error!("history: open failed, persistence disabled: {e}");
+            None
+        }
+    };
+
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -55,9 +76,30 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![dictate_once, set_dictation_style])
-        .setup(|app| {
+        .plugin(tauri_plugin_store::Builder::default().build());
+
+    #[cfg(feature = "real-engines")]
+    {
+        builder = builder.invoke_handler(tauri::generate_handler![
+            dictate_once,
+            set_dictation_style,
+            history_recent,
+            history_search,
+            history_delete,
+            history_clear,
+            history_stats,
+            history_paste,
+            quickpaste_paste,
+            quickpaste_close,
+        ]);
+    }
+    #[cfg(not(feature = "real-engines"))]
+    {
+        builder =
+            builder.invoke_handler(tauri::generate_handler![dictate_once, set_dictation_style]);
+    }
+    builder
+        .setup(move |app| {
             let handle = app.handle().clone();
 
             // System tray with Open / Pause / Quit menu.
@@ -70,10 +112,21 @@ pub fn run() {
                 tracing::warn!("could not create listen-pill window: {e}");
             }
 
-            // Real-engines: spawn the hotkey daemon and bridge events to
-            // Tauri's event system + the pill overlay.
+            // Pre-warm the quick-paste palette window (hidden until Alt+Meta+H).
+            if let Err(e) = quickpaste::create_quickpaste_window(&handle) {
+                tracing::warn!("could not create quick-paste window: {e}");
+            }
+
+            // Make the history store available to Tauri commands.
             #[cfg(feature = "real-engines")]
-            session::spawn_session_daemon(handle);
+            if let Some(history) = history.clone() {
+                app.manage(history);
+            }
+
+            // Real-engines: spawn the hotkey daemon and bridge events to
+            // Tauri's event system + the pill overlay + history.
+            #[cfg(feature = "real-engines")]
+            session::spawn_session_daemon(handle, history);
 
             Ok(())
         })

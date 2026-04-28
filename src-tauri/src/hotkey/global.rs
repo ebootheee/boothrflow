@@ -73,15 +73,20 @@ impl HotkeySource for RdevHotkeySource {
 fn run_listener(tx: Sender<HotkeyEvent>) {
     let ctrl = Arc::new(AtomicBool::new(false));
     let meta = Arc::new(AtomicBool::new(false));
+    let alt = Arc::new(AtomicBool::new(false));
     let both_was = Arc::new(AtomicBool::new(false));
 
     let cb_ctrl = ctrl.clone();
     let cb_meta = meta.clone();
+    let cb_alt = alt.clone();
     let cb_both = both_was.clone();
 
-    tracing::info!("hotkey: starting rdev listener (Ctrl+Meta hold-to-talk)");
+    tracing::info!(
+        "hotkey: starting rdev listener (Ctrl+Meta hold-to-talk, Alt+Meta+H quick-paste)"
+    );
 
     if let Err(e) = rdev::listen(move |event| {
+        // Maintain modifier state for both combos.
         match event.event_type {
             EventType::KeyPress(Key::ControlLeft | Key::ControlRight) => {
                 cb_ctrl.store(true, Ordering::SeqCst);
@@ -95,9 +100,23 @@ fn run_listener(tx: Sender<HotkeyEvent>) {
             EventType::KeyRelease(Key::MetaLeft | Key::MetaRight) => {
                 cb_meta.store(false, Ordering::SeqCst);
             }
+            EventType::KeyPress(Key::Alt | Key::AltGr) => {
+                cb_alt.store(true, Ordering::SeqCst);
+            }
+            EventType::KeyRelease(Key::Alt | Key::AltGr) => {
+                cb_alt.store(false, Ordering::SeqCst);
+            }
+            // Quick-paste: rising edge of H while Alt + Meta both held.
+            EventType::KeyPress(Key::KeyH) => {
+                if cb_alt.load(Ordering::SeqCst) && cb_meta.load(Ordering::SeqCst) {
+                    let _ = tx.send(HotkeyEvent::QuickPasteOpen);
+                    return;
+                }
+            }
             _ => return,
         }
 
+        // PTT (Ctrl+Meta) edge detection.
         let now = cb_ctrl.load(Ordering::SeqCst) && cb_meta.load(Ordering::SeqCst);
         let prev = cb_both.swap(now, Ordering::SeqCst);
         if now != prev {
@@ -106,7 +125,6 @@ fn run_listener(tx: Sender<HotkeyEvent>) {
             } else {
                 HotkeyEvent::Release
             };
-            // Best-effort: if the consumer isn't running we silently drop.
             let _ = tx.send(evt);
         }
     }) {

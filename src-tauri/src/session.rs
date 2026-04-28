@@ -19,7 +19,10 @@ mod real {
     use serde::Serialize;
     use tauri::{AppHandle, Emitter};
 
+    use std::sync::Arc;
+
     use crate::audio::{AudioFrame, AudioSource, CpalAudioSource};
+    use crate::history::{HistoryStore, RecordRequest};
     use crate::hotkey::{HotkeyEvent, HotkeySource, RdevHotkeySource};
     use crate::injector::{ClipboardInjector, Injector};
     use crate::llm::{should_skip_llm, CleanupRequest, LlmCleanup, OpenAiCompatLlmCleanup};
@@ -44,18 +47,18 @@ mod real {
         peak_dbfs: f32,
     }
 
-    pub fn spawn_session_daemon(app: AppHandle) {
+    pub fn spawn_session_daemon(app: AppHandle, history: Option<Arc<HistoryStore>>) {
         thread::Builder::new()
             .name("boothrflow-session".into())
             .spawn(move || {
-                if let Err(e) = run(app) {
+                if let Err(e) = run(app, history) {
                     tracing::error!("session daemon errored: {e}");
                 }
             })
             .ok();
     }
 
-    fn run(app: AppHandle) -> crate::error::Result<()> {
+    fn run(app: AppHandle, history: Option<Arc<HistoryStore>>) -> crate::error::Result<()> {
         let hotkey = RdevHotkeySource::new();
         let hotkey_rx = hotkey.start()?;
         tracing::info!("session daemon ready — Ctrl+Meta to dictate");
@@ -132,6 +135,14 @@ mod real {
 
         for event in hotkey_rx.iter() {
             match event {
+                HotkeyEvent::QuickPasteOpen => {
+                    // Capture the currently-focused window so we can paste
+                    // back into it after the user picks an entry.
+                    crate::quickpaste::capture_target_window();
+                    if let Err(e) = crate::quickpaste::show(&app) {
+                        tracing::warn!("quickpaste show failed: {e}");
+                    }
+                }
                 HotkeyEvent::Press => {
                     if tray::is_paused() {
                         tracing::info!("hotkey: press ignored (paused)");
@@ -162,7 +173,8 @@ mod real {
                         match hotkey_rx.recv_timeout(Duration::from_millis(20)) {
                             Ok(HotkeyEvent::Release) => released = true,
                             Ok(HotkeyEvent::Press) => {} // duplicate, ignore
-                            Err(_) => {}                 // timeout
+                            Ok(HotkeyEvent::QuickPasteOpen) => {} // ignore mid-dictation
+                            Err(_) => {}                          // timeout
                         }
                     }
 
@@ -183,7 +195,7 @@ mod real {
                     let _ = overlay::hide(&app);
                     tray::set_listening(&app, false);
 
-                    // STT on the captured audio, optional LLM cleanup, then paste.
+                    // STT on the captured audio, optional LLM cleanup, then paste, then persist.
                     match &stt {
                         Some(engine) => {
                             let pcm: Vec<f32> =
@@ -193,6 +205,8 @@ mod real {
                                 engine,
                                 llm.as_ref(),
                                 injector.as_ref(),
+                                history.as_deref(),
+                                captured_elapsed.as_millis() as u64,
                                 &pcm,
                             );
                         }
@@ -219,6 +233,8 @@ mod real {
         engine: &WhisperSttEngine,
         llm: Option<&OpenAiCompatLlmCleanup>,
         injector: Option<&ClipboardInjector>,
+        history: Option<&HistoryStore>,
+        capture_ms: u64,
         pcm: &[f32],
     ) {
         let stt_result = match engine.transcribe(pcm) {
@@ -262,6 +278,24 @@ mod real {
             if let Err(e) = inj.inject(&formatted) {
                 tracing::error!("inject failed: {e}");
                 let _ = app.emit("dictation:error", e.to_string());
+            }
+        }
+
+        // Persist to history. Embedding fires-and-forgets in a background
+        // thread inside record(); this call returns in <1ms after the SQL
+        // insert, so it stays out of the dictation hot path.
+        if let Some(hist) = history {
+            let req = RecordRequest {
+                raw: stt_result.text.clone(),
+                formatted,
+                style,
+                app_exe: None, // populated when W5 wires context detection
+                window_title: None,
+                duration_ms: capture_ms,
+                llm_ms,
+            };
+            if let Err(e) = hist.record(req) {
+                tracing::warn!("history record failed: {e}");
             }
         }
     }

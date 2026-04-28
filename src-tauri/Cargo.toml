@@ -51,6 +51,9 @@ real-engines = [
   "dep:enigo",
   "dep:arboard",
   "dep:reqwest",
+  "dep:rusqlite",
+  "dep:rusqlite_migration",
+  "dep:chrono",
 ]
 win32-headed = []
 
@@ -128,10 +131,15 @@ dirs = { version = "5", optional = true }
 # existing Ollama / llama-server / LM Studio install.
 reqwest = { version = "0.12", features = ["json", "blocking"], optional = true }
 
-# Embeddings + history (P3)
-# rusqlite = { version = "0.32", features = ["bundled"], optional = true }
-# rusqlite_migration = { version = "2", optional = true }
-# fastembed = { version = "4", optional = true }
+# Embeddings + history (P3 W7)
+# rusqlite bundled SQLite + FTS5 for lexical search. Embeddings come from
+# Ollama (or any OpenAI-compat /v1/embeddings endpoint) so no embedding
+# model gets bundled in the binary. Semantic search via brute-force cosine
+# in Rust over BLOB-stored f32 vectors — fine for sub-10k entries; swap in
+# sqlite-vec / vec0 in a later phase when histories actually grow.
+rusqlite = { version = "0.34", features = ["bundled"], optional = true }
+rusqlite_migration = { version = "2", optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
 
 # Injector (P1 W3)
 enigo = { version = "0.6", optional = true }

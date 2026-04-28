@@ -20,6 +20,10 @@ impl ScriptedHotkey {
     pub fn one_press_release() -> Self {
         Self::new(vec![HotkeyEvent::Press, HotkeyEvent::Release])
     }
+
+    pub fn one_quickpaste() -> Self {
+        Self::new(vec![HotkeyEvent::QuickPasteOpen])
+    }
 }
 
 impl HotkeySource for ScriptedHotkey {
