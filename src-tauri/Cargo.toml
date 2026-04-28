@@ -32,7 +32,13 @@ required-features = ["real-engines"]
 #   win32-headed  – run Win32 smoke tests that need a real desktop session
 # ──────────────────────────────────────────────────────────────────────────
 [features]
-default = ["test-fakes"]
+# Both fakes and real-engines on by default so `tauri dev` builds the
+# full pipeline. The fakes-only fast inner loop is opt-in via:
+#   cargo nextest run --no-default-features --features test-fakes
+# Tauri-cli passes `--no-default-features --features <defaults>` and
+# enumerates them, so leaving real-engines out of `default` would mean
+# `tauri dev` builds the gutted spine.
+default = ["test-fakes", "real-engines"]
 test-fakes = []
 real-engines = [
   "dep:cpal",
