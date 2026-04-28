@@ -3,9 +3,11 @@
 //! Production wraps `transcribe-rs` (multi-engine: whisper-cpp, parakeet,
 //! moonshine, …). A scripted fake answers tests without any model files.
 
+use serde::Serialize;
+
 use crate::error::Result;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SttResult {
     pub text: String,
     pub language: Option<String>,
@@ -24,3 +26,11 @@ pub trait SttEngine: Send + Sync {
 pub mod fake;
 #[cfg(any(test, feature = "test-fakes"))]
 pub use fake::FakeSttEngine;
+
+#[cfg(feature = "real-engines")]
+pub mod whisper;
+#[cfg(feature = "real-engines")]
+pub use whisper::{
+    default_model_path, default_models_dir, SerializedWhisperSttEngine, WhisperSttEngine,
+    DEFAULT_MODEL_FILE, DEFAULT_MODEL_URL,
+};

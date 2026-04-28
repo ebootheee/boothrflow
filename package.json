@@ -19,7 +19,9 @@
   },
   "scripts": {
     "dev": "tauri dev",
+    "dev:msvc": "scripts\\cargo-msvc.bat pnpm exec tauri dev",
     "build": "tauri build",
+    "build:msvc": "scripts\\cargo-msvc.bat pnpm exec tauri build",
     "dev:vite": "vite",
     "build:vite": "vite build",
     "preview": "vite preview",
@@ -30,7 +32,7 @@
     "test:fe:watch": "vitest",
     "test:fe:browser": "vitest run --project component",
     "test:rust": "cd src-tauri && cargo nextest run --no-default-features --features test-fakes",
-    "test:rust:real": "cd src-tauri && cargo nextest run",
+    "test:rust:real": "scripts\\cargo-msvc.bat -C src-tauri nextest run --features real-engines",
     "test:rust:doc": "cd src-tauri && cargo test --doc --no-default-features --features test-fakes",
     "test:e2e": "playwright test",
     "check": "pnpm check:types && pnpm check:lint && pnpm check:format && pnpm check:rust",

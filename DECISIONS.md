@@ -280,6 +280,43 @@ Errors flow up via `Result<T, E>` until the query layer, where they're either au
 
 ---
 
+## ADR-013 — Windows native build env via wrapper script
+
+**Status:** Accepted, 2026-04-27.
+
+**Context.** Bindgen-using crates (`whisper-rs`, `sherpa-rs`, `llama-cpp-2`) need libclang + MSVC/SDK `INCLUDE` paths to parse C headers. Rust's MSVC integration sets these up for `cc` but **not** for `bindgen`. Plain `cargo build` from a non-VS-dev shell silently produces empty bindings (`pub struct foo { _address: u8 }`) and the build fails with cryptic size-assertion errors.
+
+**Decision.** Ship `scripts/cargo-msvc.bat` that:
+
+1. Locates `libclang.dll` (defaults: `C:\Program Files\LLVM\bin`; honors `BOOTHRFLOW_LLVM_PATH`).
+2. Locates `vcvars64.bat` (BuildTools / Community / Professional / Enterprise).
+3. Sources `vcvars64.bat` to set `INCLUDE`, `LIB`, `PATH`, etc.
+4. Sets `LIBCLANG_PATH`.
+5. Forwards remaining args to `cargo`.
+
+Hooked into `package.json`:
+
+- `pnpm dev:msvc` → `tauri dev` with env loaded
+- `pnpm build:msvc` → `tauri build` with env loaded
+- `pnpm test:rust:real` → `cargo nextest run --features real-engines` with env
+
+The fakes-only inner loop (`pnpm test:rust`, `pnpm test:fe`) still works in any shell because `test-fakes` doesn't compile the heavy native deps.
+
+**Consequences.**
+
+- Windows contributors: install `Microsoft.VisualStudio.2022.BuildTools` + `LLVM.LLVM` (both `winget install`); use the `:msvc` pnpm scripts.
+- Mac/Linux: unaffected — clang and SDK headers are auto-discovered.
+- CI: GitHub Actions Windows job uses the wrapper; same code path as local dev.
+- Tradeoff: one extra script-name to remember on Windows. Mitigated by README docs and pnpm script aliases.
+
+**Rejected alternatives.**
+
+- `.cargo/config.toml [env]` with hardcoded paths: brittle (breaks across MSVC/SDK version updates).
+- Require contributors to use Developer Command Prompt: invisible UX, easy to forget which shell they're in.
+- Switch to a non-bindgen STT crate: doesn't exist for whisper.cpp; compromises the architecture.
+
+---
+
 ## How to add a new ADR
 
 1. Append below the last one with the next number.

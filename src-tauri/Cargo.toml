@@ -109,7 +109,7 @@ rdev = { git = "https://github.com/rustdesk-org/rdev", optional = true }
 voice_activity_detector = { version = "0.2", optional = true }
 
 # STT (P1 W2)
-whisper-rs = { version = "0.14", optional = true }
+whisper-rs = { version = "0.16", optional = true }
 dirs = { version = "5", optional = true }
 
 # LLM (P2)

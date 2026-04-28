@@ -20,20 +20,68 @@ See [`DECISIONS.md`](./DECISIONS.md) for ADRs.
 | Area                         | Status                              |
 | ---------------------------- | ----------------------------------- |
 | Plan + ADRs (12 ADRs)        | Done                                |
-| Scaffold + green test suite  | Done — 17 Rust + 7 FE tests passing |
-| Hot path (mic → STT → paste) | Not started — Phase 1 W1            |
+| Scaffold + green test suite  | Done — 22 Rust + 7 FE tests passing |
+| P1 W1: audio + hotkey + pill | Done                                |
+| P1 W2: VAD + Whisper STT     | Done — needs ggml-tiny.en.bin       |
+| P1 W3: paste injection       | Next                                |
 | LLM cleanup                  | Fakes wired; real engine Phase 2 W4 |
 | Memory / history             | Not started — Phase 3 W7            |
 
+## Getting a Whisper model
+
+The tiny English model (~75MB) is the dev default. After `pnpm install`:
+
+```powershell
+$dest = "$env:APPDATA\boothrflow\models\ggml-tiny.en.bin"
+New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+Invoke-WebRequest "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin" -OutFile $dest
+```
+
+Or any equivalent `curl`. The app will report "Whisper model not loaded"
+in the UI if the file is missing; transcription stays gracefully degraded
+until the file appears.
+
 ## Prerequisites (developers)
 
-- **Node 22+** and **pnpm 9+**
-- **Rust stable** (install via [rustup](https://rustup.rs/) — `winget install Rustlang.Rustup` on Windows)
-- **System deps for Tauri 2** — see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
-- **lefthook** — `pnpm install` will set hooks up automatically
-- **cargo-nextest** — `cargo install cargo-nextest` (used by `pnpm test:rust`)
+### Both platforms
 
-Optional but recommended:
+- **Node 22+** and **pnpm 9+**
+- **Rust stable** — `winget install Rustlang.Rustup` (Windows) or rustup.rs
+- **cargo-nextest** — `cargo install cargo-nextest --locked`
+- **lefthook** — installed automatically by `pnpm install`
+
+### Windows-specific (for the `real-engines` feature build)
+
+`whisper-rs` and other native ML deps use `bindgen` which needs libclang and
+the Windows SDK headers. Plain `cargo build` from a non-VS-dev shell doesn't
+get these, so we ship `scripts/cargo-msvc.bat` to wrap cargo with the env
+pre-loaded.
+
+One-time install:
+
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools     # MSVC + Win SDK
+winget install LLVM.LLVM                                   # libclang for bindgen
+```
+
+Then run any cargo command via the wrapper:
+
+```bat
+scripts\cargo-msvc.bat build --features real-engines
+scripts\cargo-msvc.bat nextest run --features real-engines
+```
+
+The `pnpm dev:msvc` and `pnpm build:msvc` and `pnpm test:rust:real` scripts
+use the wrapper. For the fast inner-loop fakes-only path, `pnpm test:rust`
+works in any shell because it doesn't compile the heavy native deps.
+
+### macOS / Linux
+
+`pnpm dev`, `pnpm test:rust:real`, etc. work directly — `whisper-rs`'s build
+finds clang via the system toolchain. (Windows is the awkward one because
+bindgen wants the SDK paths set up before invocation.)
+
+### Optional but recommended
 
 - `cargo-watch` or `bacon` for inner-loop test reruns
 - `cargo-llvm-cov` for coverage
