@@ -23,6 +23,7 @@
     "build": "tauri build",
     "build:msvc": "scripts\\cargo-msvc.bat pnpm exec tauri build",
     "download:model": "scripts\\download-model.bat",
+    "download:llm": "scripts\\download-llm.bat",
     "dev:vite": "vite",
     "build:vite": "vite build",
     "preview": "vite preview",

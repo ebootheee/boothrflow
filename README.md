@@ -25,8 +25,9 @@ git clone https://github.com/ebootheee/boothrflow
 cd boothrflow
 pnpm install
 
-# 3. Download the Whisper model (~75MB) — works in any shell
-pnpm download:model
+# 3. Download models — works in any shell
+pnpm download:model     # whisper-tiny.en  (~75MB)
+pnpm download:llm       # qwen 1.5B Q4_K_M (~1GB, optional but recommended)
 
 # 4. Boot
 pnpm dev:msvc
@@ -38,16 +39,17 @@ Hold `Ctrl + Win`, speak into Notepad, release. Text pastes.
 
 ## Status
 
-| Area                                 | Status                              |
-| ------------------------------------ | ----------------------------------- |
-| Plan + 13 ADRs                       | Done                                |
-| Scaffold + green test suite          | Done — 22 Rust + 7 FE tests passing |
-| **P1 W1**: audio + hotkey + pill     | Done                                |
-| **P1 W2**: VAD + Whisper STT         | Done — needs ggml-tiny.en.bin       |
-| **P1 W3**: paste injection + tray    | Done                                |
-| **P2 W4**: LLM cleanup (Qwen 2.5 3B) | Next                                |
-| Memory / history                     | Phase 3                             |
-| Mac + Linux                          | Phase 4                             |
+| Area                                                  | Status                              |
+| ----------------------------------------------------- | ----------------------------------- |
+| Plan + 13 ADRs                                        | Done                                |
+| Scaffold + green test suite                           | Done — 22 Rust + 7 FE tests passing |
+| **P1 W1**: audio + hotkey + pill                      | Done                                |
+| **P1 W2**: VAD + Whisper STT                          | Done — needs ggml-tiny.en.bin       |
+| **P1 W3**: paste injection + tray                     | Done                                |
+| **P2 W4**: LLM cleanup (Qwen 2.5 1.5B) + style picker | Done — needs ~1GB Qwen GGUF         |
+| **P2 W5**: app-context detection                      | Next                                |
+| Memory / history                                      | Phase 3                             |
+| Mac + Linux                                           | Phase 4                             |
 
 ## Documentation
 

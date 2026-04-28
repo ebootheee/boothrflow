@@ -11,8 +11,17 @@ use crate::error::BoothError;
 use crate::injector::RecordingInjector;
 use crate::llm::FakeLlmCleanup;
 use crate::pipeline::Pipeline;
-use crate::settings::Style;
+use crate::settings::{self, Style};
 use crate::stt::FakeSttEngine;
+
+/// Update the active style. Called by the FE whenever the user changes the
+/// dropdown; the session daemon reads `settings::current_style()` before
+/// each LLM cleanup call.
+#[tauri::command]
+pub fn set_dictation_style(style: Style) {
+    tracing::info!("settings: style → {style:?}");
+    settings::set_current_style(style);
+}
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct DictateResult {

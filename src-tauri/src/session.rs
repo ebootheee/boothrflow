@@ -22,9 +22,19 @@ mod real {
     use crate::audio::{AudioFrame, AudioSource, CpalAudioSource};
     use crate::hotkey::{HotkeyEvent, HotkeySource, RdevHotkeySource};
     use crate::injector::{ClipboardInjector, Injector};
+    use crate::llm::{should_skip_llm, CleanupRequest, LlamaCppLlmCleanup, LlmCleanup};
     use crate::overlay;
+    use crate::settings;
     use crate::stt::{SttEngine, SttResult, WhisperSttEngine};
     use crate::tray;
+
+    #[derive(Debug, Clone, Serialize)]
+    struct DictationFormatted {
+        raw: String,
+        formatted: String,
+        style: settings::Style,
+        llm_ms: u64,
+    }
 
     #[derive(Debug, Clone, Serialize)]
     struct DictationSummary {
@@ -63,6 +73,20 @@ mod real {
             Err(e) => {
                 tracing::warn!("whisper not available: {e}");
                 let _ = app.emit("dictation:model-missing", e.to_string());
+                None
+            }
+        };
+
+        // LLM cleanup. Qwen 1.5B is ~1GB; load takes ~1s. Missing model is
+        // recoverable: the pipeline falls back to raw transcripts.
+        let llm: Option<LlamaCppLlmCleanup> = match LlamaCppLlmCleanup::from_default_location() {
+            Ok(engine) => {
+                tracing::info!("llm: model loaded ({})", engine.name());
+                Some(engine)
+            }
+            Err(e) => {
+                tracing::warn!("llm not available, falling back to raw transcripts: {e}");
+                let _ = app.emit("dictation:llm-missing", e.to_string());
                 None
             }
         };
@@ -132,12 +156,18 @@ mod real {
                     let _ = overlay::hide(&app);
                     tray::set_listening(&app, false);
 
-                    // STT on the captured audio, then paste.
+                    // STT on the captured audio, optional LLM cleanup, then paste.
                     match &stt {
                         Some(engine) => {
                             let pcm: Vec<f32> =
                                 frames.iter().flat_map(|f| f.iter().copied()).collect();
-                            transcribe_and_emit(&app, engine, injector.as_ref(), &pcm);
+                            transcribe_and_emit(
+                                &app,
+                                engine,
+                                llm.as_ref(),
+                                injector.as_ref(),
+                                &pcm,
+                            );
                         }
                         None => {
                             let _ = app.emit(
@@ -160,31 +190,86 @@ mod real {
     fn transcribe_and_emit(
         app: &AppHandle,
         engine: &WhisperSttEngine,
+        llm: Option<&LlamaCppLlmCleanup>,
         injector: Option<&ClipboardInjector>,
         pcm: &[f32],
     ) {
-        match engine.transcribe(pcm) {
-            Ok(result) => {
-                tracing::info!(
-                    "transcript ({} ms): \"{}\"",
-                    result.duration_ms,
-                    result.text
-                );
-                emit_result(app, &result);
-
-                // Paste into the focused app if the transcript is non-empty.
-                if !result.text.is_empty() {
-                    if let Some(inj) = injector {
-                        if let Err(e) = inj.inject(&result.text) {
-                            tracing::error!("inject failed: {e}");
-                            let _ = app.emit("dictation:error", e.to_string());
-                        }
-                    }
-                }
-            }
+        let stt_result = match engine.transcribe(pcm) {
+            Ok(r) => r,
             Err(e) => {
                 tracing::error!("stt error: {e}");
                 let _ = app.emit("dictation:error", e.to_string());
+                return;
+            }
+        };
+
+        tracing::info!(
+            "transcript ({} ms): \"{}\"",
+            stt_result.duration_ms,
+            stt_result.text
+        );
+        emit_result(app, &stt_result);
+
+        if stt_result.text.is_empty() {
+            return;
+        }
+
+        // Optional LLM cleanup pass. Skip for short / opted-out cases; fall
+        // back to raw transcript on any LLM failure.
+        let style = settings::current_style();
+        let (formatted, llm_ms) = run_llm_cleanup(&stt_result.text, style, llm);
+
+        if formatted != stt_result.text {
+            let _ = app.emit(
+                "dictation:formatted",
+                &DictationFormatted {
+                    raw: stt_result.text.clone(),
+                    formatted: formatted.clone(),
+                    style,
+                    llm_ms,
+                },
+            );
+        }
+
+        if let Some(inj) = injector {
+            if let Err(e) = inj.inject(&formatted) {
+                tracing::error!("inject failed: {e}");
+                let _ = app.emit("dictation:error", e.to_string());
+            }
+        }
+    }
+
+    /// Returns the post-cleanup string and elapsed ms (0 if LLM was skipped).
+    fn run_llm_cleanup(
+        raw: &str,
+        style: settings::Style,
+        llm: Option<&LlamaCppLlmCleanup>,
+    ) -> (String, u64) {
+        // Hard skips: explicit raw style, no LLM loaded, very short utterance.
+        if matches!(style, settings::Style::Raw) {
+            return (raw.to_string(), 0);
+        }
+        let Some(llm) = llm else {
+            return (raw.to_string(), 0);
+        };
+        if should_skip_llm(raw, true) {
+            return (raw.to_string(), 0);
+        }
+
+        let started = std::time::Instant::now();
+        match llm.cleanup(CleanupRequest {
+            raw_text: raw,
+            style,
+            app_context: None,
+        }) {
+            Ok(text) => {
+                let ms = started.elapsed().as_millis() as u64;
+                tracing::info!("llm cleanup ({ms} ms): \"{raw}\" → \"{text}\"");
+                (text, ms)
+            }
+            Err(e) => {
+                tracing::error!("llm cleanup failed, falling back to raw: {e}");
+                (raw.to_string(), 0)
             }
         }
     }

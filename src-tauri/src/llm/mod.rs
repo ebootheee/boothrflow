@@ -24,6 +24,14 @@ pub mod fake;
 #[cfg(any(test, feature = "test-fakes"))]
 pub use fake::FakeLlmCleanup;
 
+#[cfg(feature = "real-engines")]
+pub mod llama;
+#[cfg(feature = "real-engines")]
+pub use llama::{
+    default_model_path as llama_default_model_path, LlamaCppLlmCleanup,
+    DEFAULT_MODEL_FILE as LLAMA_DEFAULT_MODEL_FILE, DEFAULT_MODEL_URL as LLAMA_DEFAULT_MODEL_URL,
+};
+
 /// Convenience: when raw text is short or the user has LLM disabled, skip the
 /// pass entirely and pass through the raw transcript.
 pub fn should_skip_llm(raw: &str, llm_enabled: bool) -> bool {

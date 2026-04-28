@@ -29,7 +29,7 @@ pub mod stt;
 pub mod tray;
 pub mod vad;
 
-use commands::dictate_once;
+use commands::{dictate_once, set_dictation_style};
 
 /// Entry point invoked from `main.rs`. Wires Tauri plugins, registers commands,
 /// and starts the runtime.
@@ -56,7 +56,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![dictate_once])
+        .invoke_handler(tauri::generate_handler![dictate_once, set_dictation_style])
         .setup(|app| {
             let handle = app.handle().clone();
 
