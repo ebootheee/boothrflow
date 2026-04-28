@@ -34,7 +34,15 @@ required-features = ["real-engines"]
 [features]
 default = ["test-fakes"]
 test-fakes = []
-real-engines = ["dep:cpal", "dep:rubato", "dep:hound", "dep:rdev"]
+real-engines = [
+  "dep:cpal",
+  "dep:rubato",
+  "dep:hound",
+  "dep:rdev",
+  "dep:voice_activity_detector",
+  "dep:whisper-rs",
+  "dep:dirs",
+]
 win32-headed = []
 
 [profile.dev]
@@ -97,11 +105,12 @@ hound = { version = "3.5", optional = true }
 # Hotkey (P1 W1)
 rdev = { git = "https://github.com/rustdesk-org/rdev", optional = true }
 
-# VAD (P1 W2) — uncomment when wiring
-# voice_activity_detector = { version = "0.2", optional = true }
+# VAD (P1 W2)
+voice_activity_detector = { version = "0.2", optional = true }
 
-# STT (P1 W2) — uncomment when wiring
-# whisper-rs = { version = "0.13", optional = true }
+# STT (P1 W2)
+whisper-rs = { version = "0.14", optional = true }
+dirs = { version = "5", optional = true }
 
 # LLM (P2)
 # llama-cpp-2 = { version = "0.1", optional = true }

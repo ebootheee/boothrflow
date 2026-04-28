@@ -33,9 +33,9 @@ use crate::audio::{AudioFrame, AudioSource};
 use crate::error::{BoothError, Result};
 
 const TARGET_RATE: u32 = 16_000;
-/// 30ms at 16kHz — matches Silero VAD frame size and is small enough that
-/// VAD/STT consumers don't see noticeable batching latency.
-const TARGET_FRAME_SAMPLES: usize = 480;
+/// 32ms at 16kHz. Matches Silero VAD's preferred chunk size for 16kHz
+/// (512 samples), keeping the audio → VAD path zero-buffer.
+const TARGET_FRAME_SAMPLES: usize = 512;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct MicDevice {

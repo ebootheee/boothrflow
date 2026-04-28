@@ -19,3 +19,11 @@ pub trait Vad: Send + Sync {
 pub mod fake;
 #[cfg(any(test, feature = "test-fakes"))]
 pub use fake::FakeVad;
+
+#[cfg(feature = "real-engines")]
+pub mod silero;
+#[cfg(feature = "real-engines")]
+pub use silero::SileroVad;
+
+pub mod endpoint;
+pub use endpoint::{EndpointDetector, EndpointEvent};
