@@ -21,7 +21,9 @@ pub mod error;
 pub mod hotkey;
 pub mod injector;
 pub mod llm;
+pub mod overlay;
 pub mod pipeline;
+pub mod session;
 pub mod settings;
 pub mod stt;
 pub mod vad;
@@ -50,6 +52,19 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![dictate_once])
+        .setup(|app| {
+            // Pre-warm the listen-pill overlay so first-press latency is low.
+            if let Err(e) = overlay::create_pill_window(&app.handle().clone()) {
+                tracing::warn!("could not create listen-pill window: {e}");
+            }
+
+            // Real-engines: spawn the hotkey daemon and bridge events to
+            // Tauri's event system + the pill overlay.
+            #[cfg(feature = "real-engines")]
+            session::spawn_session_daemon(app.handle().clone());
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
