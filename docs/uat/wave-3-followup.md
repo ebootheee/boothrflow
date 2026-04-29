@@ -173,3 +173,18 @@ var surface area is small enough to map 1-to-1.
 - In-app Settings panel (Phase 2 backlog item, added this commit).
 - Linux port (Wave 4).
 - Onboarding wizard, code signing, notarization (Wave 6 polish).
+
+---
+
+## Postscript — 2026-04-28 evening
+
+Eric merged `feat/wave-3-mac` → `main` (commit `7c02cbe`) and pushed
+without waiting for the Windows UAT pass. Rationale: macOS UAT was
+clean across both polish rounds, the Windows path has no platform-
+specific code paths added in this work (the macOS-only bits are all
+`cfg(target_os = "macos")` and inert on Windows), and main was 21
+commits behind anyway — landing the wave as one merge keeps the
+history readable. Windows UAT becomes a follow-up on `main`; any
+regression there would land as a fix-on-main rather than blocking the
+merge. ADR-006 small-PR convention deliberately broken here because
+the wave-branch had been an integration branch all along.

@@ -1,12 +1,16 @@
-# Wave 3 — macOS Port (status: UAT polish landed on `feat/wave-3-mac`, 2026-04-28)
+# Wave 3 — macOS Port (status: merged to `main` 2026-04-28)
 
-> **Update 2026-04-28:** First on-Mac UAT pass surfaced eight issues (white
-> pill corners, frozen elapsed clock, partial-text clipping, main-window
-> scroll dead, hotkey desync after focus changes, ambiguous "0 ms" LLM
-> cell, missing permission UX, Whisper model question). All addressed in
-> this commit. Items #11 below ("Permission request UX") moved from
-> "deferred to Wave 6" to "shipped"; everything else from Wave 3's
-> original scope still applies. See `docs/uat/wave-3.md` for the report.
+> **Update 2026-04-28:** Merged via `feat/wave-3-mac` → `main`. The
+> on-Mac UAT pass surfaced eight issues (white pill corners, frozen
+> elapsed clock, partial-text clipping, main-window scroll dead, hotkey
+> desync after focus changes, ambiguous "0 ms" LLM cell, missing
+> permission UX, Whisper model question). All addressed before merge.
+> A second polish round added the tap-to-toggle hotkey
+> (`Ctrl+Alt+Space` / `Ctrl+Option+Space`), Apple Silicon Metal default,
+> and two-line partial wrap. Item #11 below ("Permission request UX")
+> moved from "deferred to Wave 6" to "shipped"; everything else from
+> Wave 3's original scope still applies. See `docs/uat/wave-3.md` and
+> `docs/uat/wave-3-followup.md` for the reports.
 
 ---
 

@@ -2,7 +2,7 @@
 
 > Where we are and where we're going. The detailed engineering plan lives in [`PLAN.md`](./PLAN.md); this is the user-facing summary.
 
-## Current state — Wave 3 macOS bring-up + UAT polish (April 2026)
+## Current state — Waves 1–3 landed on `main` (April 2026)
 
 The core push-to-talk dictation loop works end-to-end on Windows _and_ macOS.
 
@@ -20,7 +20,7 @@ The core push-to-talk dictation loop works end-to-end on Windows _and_ macOS.
 
 ### Cross-platform status (post Wave 3 polish)
 
-The Wave 3 UAT-polish commit affects three platforms differently:
+Wave 3 polish lands across platforms as follows:
 
 | Subsystem                              | macOS                    | Windows                                    | Linux                                                                      |
 | -------------------------------------- | ------------------------ | ------------------------------------------ | -------------------------------------------------------------------------- |
@@ -94,6 +94,6 @@ Goal: 1.0.
 
 ## How feature decisions get made
 
-Every architecturally-significant choice goes through an ADR ([`DECISIONS.md`](./DECISIONS.md), 13 entries so far). UATs after each phase ([`docs/uat/`](./docs/uat/)) capture what shipped, what got deferred, and why.
+Every architecturally-significant choice goes through an ADR ([`DECISIONS.md`](./DECISIONS.md), 14 entries so far). UATs after each phase ([`docs/uat/`](./docs/uat/)) capture what shipped, what got deferred, and why.
 
 If you want a specific feature, open an issue with the use case. Concrete user friction beats theoretical architecture in our prioritization.

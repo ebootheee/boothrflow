@@ -8,11 +8,11 @@ An open-source replacement for [Wispr Flow](https://wisprflow.ai/), built around
 2. **Tiny footprint.** Tauri 2 + Rust. Target: ~30MB installer, ~80MB RAM idle.
 3. **Persistent, searchable memory.** Every dictation goes into a local SQLite store with both lexical and semantic search _(landing in Phase 3)_.
 
-**Status:** pre-alpha. Phase 1 hot path (mic → Whisper STT → paste) is working; Phase 2 (LLM cleanup, styles, app-context) is next. See [`ROADMAP.md`](./ROADMAP.md).
+**Status:** pre-alpha. Hot path (mic → Whisper STT → LLM cleanup → paste) works on Windows and macOS, with persistent history and quick-paste palette. App-context-aware structured formatting and the in-app Settings panel are next. See [`ROADMAP.md`](./ROADMAP.md).
 
-## Try it (macOS, Wave 3 branch)
+## Try it (macOS)
 
-Wave 3 targets Apple Silicon first and Intel macOS best-effort.
+Apple Silicon first; Intel macOS best-effort.
 
 ```bash
 # 1. Install dev dependencies (one-time)
@@ -24,7 +24,6 @@ brew services start ollama
 # 2. Clone + install JS deps
 git clone https://github.com/ebootheee/boothrflow
 cd boothrflow
-git checkout feat/wave-3-mac
 corepack enable
 pnpm install
 
@@ -118,15 +117,16 @@ hands-free dictation session, tap again to stop.
 | **P2 W4**: LLM cleanup (OpenAI-compat HTTP) + style picker | Done — needs Ollama or compat server |
 | **P2 W5**: app-context detection                           | Next                                 |
 | Memory / history                                           | Done                                 |
-| **Wave 3**: macOS port                                     | Done — UAT polish landed             |
+| **Wave 3**: macOS port                                     | Done — merged to `main`              |
 | **Phase 2 backlog**: structured/app-aware formatting       | Roadmapped (see ROADMAP.md)          |
+| **Phase 2 backlog**: in-app Settings panel                 | Roadmapped (see ROADMAP.md)          |
 | Linux                                                      | Phase 4                              |
 
 ## Documentation
 
 - [`ROADMAP.md`](./ROADMAP.md) — what's coming, when
 - [`PLAN.md`](./PLAN.md) — full engineering plan with feature parity matrix vs Wispr Flow, latency budget, repo layout, risk register
-- [`DECISIONS.md`](./DECISIONS.md) — Architecture Decision Records (13 entries)
+- [`DECISIONS.md`](./DECISIONS.md) — Architecture Decision Records (14 entries)
 - [`docs/uat/`](./docs/uat/) — phase-by-phase UAT reports, including manual test plans
 
 ## Architecture (mental model)
