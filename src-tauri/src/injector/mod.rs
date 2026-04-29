@@ -17,3 +17,13 @@ pub trait Injector: Send + Sync {
 pub mod fake;
 #[cfg(any(test, feature = "test-fakes"))]
 pub use fake::RecordingInjector;
+
+#[cfg(feature = "real-engines")]
+pub mod clipboard;
+#[cfg(feature = "real-engines")]
+pub use clipboard::ClipboardInjector;
+
+#[cfg(feature = "real-engines")]
+pub mod typing;
+#[cfg(feature = "real-engines")]
+pub use typing::TypingInjector;

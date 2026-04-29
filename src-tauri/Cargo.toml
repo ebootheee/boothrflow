@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Local-first voice dictation"
 authors = ["Eric Boothe and boothrflow contributors"]
 license = "Apache-2.0"
-repository = "https://github.com/ericboothe/boothrflow"
+repository = "https://github.com/ebootheee/boothrflow"
 edition = "2021"
 rust-version = "1.82"
 default-run = "boothrflow"
@@ -19,6 +19,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "boothrflow"
 path = "src/main.rs"
 
+[[example]]
+name = "audio_meter"
+required-features = ["real-engines"]
+
 # ──────────────────────────────────────────────────────────────────────────
 # Features
 #
@@ -28,10 +32,53 @@ path = "src/main.rs"
 #   win32-headed  – run Win32 smoke tests that need a real desktop session
 # ──────────────────────────────────────────────────────────────────────────
 [features]
-default = ["test-fakes"]
+# Both fakes and real-engines on by default so `tauri dev` builds the
+# full pipeline. The fakes-only fast inner loop is opt-in via:
+#   cargo nextest run --no-default-features --features test-fakes
+# Tauri-cli passes `--no-default-features --features <defaults>` and
+# enumerates them, so leaving real-engines out of `default` would mean
+# `tauri dev` builds the gutted spine.
+default = ["test-fakes", "real-engines"]
 test-fakes = []
-real-engines = []
+real-engines = [
+  "dep:cpal",
+  "dep:rubato",
+  "dep:hound",
+  "dep:rdev",
+  "dep:voice_activity_detector",
+  "dep:whisper-rs",
+  "dep:dirs",
+  "dep:enigo",
+  "dep:arboard",
+  "dep:reqwest",
+  "dep:rusqlite",
+  "dep:rusqlite_migration",
+  "dep:chrono",
+]
 win32-headed = []
+
+# ──────────────────────────────────────────────────────────────────────────
+# GPU backends for Whisper. Pick one per build; CPU-only is the safe default.
+# These forward to the matching whisper-rs / whisper.cpp backend feature.
+#
+#   gpu-vulkan – Windows/Linux portable GPU (NVIDIA/AMD/Intel). Requires the
+#                Vulkan SDK at build time (VULKAN_SDK env var) and a Vulkan
+#                loader at runtime (ships with every modern GPU driver).
+#   gpu-cuda   – Windows/Linux NVIDIA-only. Requires CUDA toolkit at build.
+#                Fastest path on NVIDIA cards but ties the binary to CUDA libs.
+#   gpu-metal  – macOS only (lands in Wave 3). No SDK install needed; built
+#                into the system. Auto-uses ANE on Apple Silicon when available.
+#
+# Build example (Windows + Vulkan):
+#   scripts\cargo-msvc.bat cargo build --release \
+#     --features "real-engines gpu-vulkan"
+#
+# These are NOT in `default` because they require an SDK; the default build
+# stays self-contained and runs CPU-only Whisper.
+# ──────────────────────────────────────────────────────────────────────────
+gpu-vulkan = ["whisper-rs?/vulkan"]
+gpu-cuda = ["whisper-rs?/cuda"]
+gpu-metal = ["whisper-rs?/metal"]
 
 [profile.dev]
 incremental = true
@@ -80,33 +127,46 @@ once_cell = "1"
 crossbeam-channel = "0.5"
 
 # ──────────────────────────────────────────────────────────────────────────
-# Heavy deps below this line are gated to v0 stubs on purpose. They get
-# uncommented + feature-gated when each subsystem is wired up. Until then,
-# the trait + Fake impl is enough to build the architectural spine.
+# Heavy deps gated to `real-engines`. Off by default so the inner-loop
+# `cargo check --no-default-features --features test-fakes` stays fast.
+# Phase 1 W1 wires audio + hotkey; W2 wires VAD + STT; W3 wires injector.
 # ──────────────────────────────────────────────────────────────────────────
-# Audio
-# cpal = "0.16"
-# rubato = "0.16"
-# hound = "3.5"
 
-# VAD
-# voice_activity_detector = "0.2"
+# Audio (P1 W1)
+cpal = { version = "0.16", optional = true }
+rubato = { version = "0.16", optional = true }
+hound = { version = "3.5", optional = true }
 
-# STT (multi-engine via transcribe-rs trait)
-# transcribe-rs = { version = "0.3.8", features = ["whisper-cpp", "onnx"] }
+# Hotkey (P1 W1)
+rdev = { git = "https://github.com/rustdesk-org/rdev", optional = true }
 
-# LLM
-# llama-cpp-2 = "0.1"
+# VAD (P1 W2)
+voice_activity_detector = { version = "0.2", optional = true }
 
-# Embeddings + history
-# rusqlite = { version = "0.32", features = ["bundled"] }
-# rusqlite_migration = "2"
-# fastembed = "4"
+# STT (P1 W2)
+whisper-rs = { version = "0.16", optional = true }
+dirs = { version = "5", optional = true }
 
-# Hotkey + injection
-# rdev = "0.5"
-# enigo = "0.6"
-# arboard = "3"
+# LLM (P2 W4) — out-of-process via OpenAI-compatible HTTP API.
+# In-process llama-cpp-2 was attempted but conflicts with whisper-rs-sys:
+# both statically link different ggml versions (LNK2005). The HTTP path
+# avoids the conflict entirely and gets GPU offload for free via the user's
+# existing Ollama / llama-server / LM Studio install.
+reqwest = { version = "0.12", features = ["json", "blocking"], optional = true }
+
+# Embeddings + history (P3 W7)
+# rusqlite bundled SQLite + FTS5 for lexical search. Embeddings come from
+# Ollama (or any OpenAI-compat /v1/embeddings endpoint) so no embedding
+# model gets bundled in the binary. Semantic search via brute-force cosine
+# in Rust over BLOB-stored f32 vectors — fine for sub-10k entries; swap in
+# sqlite-vec / vec0 in a later phase when histories actually grow.
+rusqlite = { version = "0.34", features = ["bundled"], optional = true }
+rusqlite_migration = { version = "2", optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+
+# Injector (P1 W3)
+enigo = { version = "0.6", optional = true }
+arboard = { version = "3", optional = true }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
@@ -123,6 +183,24 @@ windows = { version = "0.58", features = [
   "Win32_System_ProcessStatus",
   "Win32_Foundation",
 ] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", features = [
+  "NSRunningApplication",
+  "NSWorkspace",
+  "libc",
+] }
+
+# Auto-enable Whisper Metal backend on Apple Silicon. The base whisper-rs
+# declaration above carries no GPU features; this target-specific override
+# adds `metal` only when compiling for aarch64-apple-darwin. Cargo merges
+# feature lists across `[dependencies]` and `[target.*.dependencies]`
+# blocks, so this is additive — no effect on Intel Macs (which still use
+# CPU unless the user opts in via `--features gpu-metal`), Windows, or
+# Linux. Net effect: `pnpm dev` on M-series produces a 5–15× faster STT
+# build out of the box without the user remembering a feature flag.
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+whisper-rs = { version = "0.16", optional = true, features = ["metal"] }
 
 [dev-dependencies]
 mockall = "0.13"

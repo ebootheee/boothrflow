@@ -6,7 +6,10 @@ pre-commit:
       exclude:
         - pnpm-lock.yaml
         - "src/lib/ipc/**"
-      run: pnpm exec prettier --check {staged_files}
+      # --write auto-fixes; stage_fixed picks up the changes. CI still runs
+      # prettier --check as a strict gate; locally we just keep things tidy
+      # without blocking the commit.
+      run: pnpm exec prettier --write {staged_files}
       stage_fixed: true
 
     eslint:

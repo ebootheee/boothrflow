@@ -24,6 +24,16 @@ pub mod fake;
 #[cfg(any(test, feature = "test-fakes"))]
 pub use fake::FakeLlmCleanup;
 
+#[cfg(feature = "real-engines")]
+pub mod openai_compat;
+#[cfg(feature = "real-engines")]
+pub use openai_compat::{OpenAiCompatLlmCleanup, DEFAULT_ENDPOINT, DEFAULT_MODEL};
+
+// In-process llama via llama-cpp-2 conflicts with whisper-rs-sys (both
+// statically link different ggml versions). We use the OpenAI-compatible
+// HTTP API instead — works with Ollama, llama-server, LM Studio, vLLM,
+// or any cloud BYOK provider.
+
 /// Convenience: when raw text is short or the user has LLM disabled, skip the
 /// pass entirely and pass through the raw transcript.
 pub fn should_skip_llm(raw: &str, llm_enabled: bool) -> bool {

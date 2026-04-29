@@ -32,7 +32,7 @@
     "category": "Productivity",
     "shortDescription": "Local-first voice dictation",
     "longDescription": "Push-to-talk voice dictation that runs entirely on your machine. Streaming STT, LLM cleanup with styles, paste anywhere, searchable history. All local.",
-    "homepage": "https://github.com/ericboothe/boothrflow",
+    "homepage": "https://github.com/ebootheee/boothrflow",
     "license": "Apache-2.0",
     "icon": [
       "icons/32x32.png",
@@ -45,7 +45,8 @@
       "minimumSystemVersion": "10.15",
       "hardenedRuntime": true,
       "entitlements": null,
-      "signingIdentity": null
+      "signingIdentity": null,
+      "infoPlist": "Info.plist"
     },
     "linux": {
       "appimage": {

@@ -1,4 +1,5 @@
 import type { Style } from "$lib/services/styles";
+import { dictationHotkeyLabel, isTauri } from "$lib/services/platform";
 
 type SettingsState = {
   style: Style;
@@ -7,10 +8,24 @@ type SettingsState = {
   privacyMode: boolean;
 };
 
+/**
+ * Push the current style to the Rust session daemon. Fire-and-forget; the
+ * daemon updates an atomic so the next dictation uses the new style.
+ */
+async function pushStyleToBackend(style: Style) {
+  if (!isTauri()) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("set_dictation_style", { style });
+  } catch (err) {
+    console.warn("set_dictation_style failed:", err);
+  }
+}
+
 function createSettings() {
-  let state = $state<SettingsState>({
+  const state = $state<SettingsState>({
     style: "casual",
-    hotkey: "Ctrl+Win",
+    hotkey: dictationHotkeyLabel(),
     llmEnabled: true,
     privacyMode: false,
   });
@@ -21,6 +36,7 @@ function createSettings() {
     },
     set style(value: Style) {
       state.style = value;
+      void pushStyleToBackend(value);
     },
     get hotkey() {
       return state.hotkey;

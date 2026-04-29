@@ -280,6 +280,72 @@ Errors flow up via `Result<T, E>` until the query layer, where they're either au
 
 ---
 
+## ADR-013 — Windows native build env via wrapper script
+
+**Status:** Accepted, 2026-04-27.
+
+**Context.** Bindgen-using crates (`whisper-rs`, `sherpa-rs`, `llama-cpp-2`) need libclang + MSVC/SDK `INCLUDE` paths to parse C headers. Rust's MSVC integration sets these up for `cc` but **not** for `bindgen`. Plain `cargo build` from a non-VS-dev shell silently produces empty bindings (`pub struct foo { _address: u8 }`) and the build fails with cryptic size-assertion errors.
+
+**Decision.** Ship `scripts/cargo-msvc.bat` that:
+
+1. Locates `libclang.dll` (defaults: `C:\Program Files\LLVM\bin`; honors `BOOTHRFLOW_LLVM_PATH`).
+2. Locates `vcvars64.bat` (BuildTools / Community / Professional / Enterprise).
+3. Sources `vcvars64.bat` to set `INCLUDE`, `LIB`, `PATH`, etc.
+4. Sets `LIBCLANG_PATH`.
+5. Forwards remaining args to `cargo`.
+
+Hooked into `package.json`:
+
+- `pnpm dev:msvc` → `tauri dev` with env loaded
+- `pnpm build:msvc` → `tauri build` with env loaded
+- `pnpm test:rust:real` → `cargo nextest run --features real-engines` with env
+
+The fakes-only inner loop (`pnpm test:rust`, `pnpm test:fe`) still works in any shell because `test-fakes` doesn't compile the heavy native deps.
+
+**Consequences.**
+
+- Windows contributors: install `Microsoft.VisualStudio.2022.BuildTools` + `LLVM.LLVM` (both `winget install`); use the `:msvc` pnpm scripts.
+- Mac/Linux: unaffected — clang and SDK headers are auto-discovered.
+- CI: GitHub Actions Windows job uses the wrapper; same code path as local dev.
+- Tradeoff: one extra script-name to remember on Windows. Mitigated by README docs and pnpm script aliases.
+
+**Rejected alternatives.**
+
+- `.cargo/config.toml [env]` with hardcoded paths: brittle (breaks across MSVC/SDK version updates).
+- Require contributors to use Developer Command Prompt: invisible UX, easy to forget which shell they're in.
+- Switch to a non-bindgen STT crate: doesn't exist for whisper.cpp; compromises the architecture.
+
+---
+
+## ADR-014 — Whisper default stays at `tiny.en`; `small.en` is the recommended upgrade
+
+**Status:** Accepted, 2026-04-28.
+
+**Context.** Wave 3 UAT raised "is `tiny.en` the right default? quality feels light." The honest answer is "no, but the right answer is per-machine, not a single global default."
+
+| Model            | Disk  | Params | CPU RTF (M-series)      | Notes                                                        |
+| ---------------- | ----- | ------ | ----------------------- | ------------------------------------------------------------ |
+| `tiny.en`        | 75MB  | 39M    | ~0.10                   | Current default. Fast, error-prone on proper nouns.          |
+| `base.en`        | 142MB | 74M    | ~0.18                   | Noticeably better; minor latency cost.                       |
+| `small.en`       | 466MB | 244M   | ~0.50 CPU / ~0.10 Metal | Sweet spot for accuracy. Realtime on Apple Silicon w/ Metal. |
+| `medium.en`      | 1.5GB | 769M   | ~1.5 CPU / ~0.30 Metal  | Approaches SOTA; slow on CPU.                                |
+| `large-v3-turbo` | 1.6GB | ~800M  | ~0.40 Metal             | Best multilingual; assumes GPU.                              |
+
+**Decision.**
+
+- Keep `ggml-tiny.en.bin` as the bundled-default download path. Smallest disk footprint, fastest cold-start, makes "first run" cheap.
+- The UI's STT chip now reads the active model name from the daemon (`whisper_model_name`), so users who upgrade actually see it.
+- Recommend `small.en` for users who care about quality. The tooltip on the chip and a note in the README point at `pnpm download:model:mac small` plus `BOOTHRFLOW_WHISPER_MODEL_FILE=ggml-small.en.bin`.
+- A real "Model picker" UI + Metal-by-default on Apple Silicon is deferred until ADR-009's Parakeet path lands — that work supersedes this one.
+
+**Consequences.**
+
+- Users on `tiny.en` get a discoverable upgrade path without a disk-heavy default.
+- Telemetry / chip honesty: the UI no longer lies "Whisper tiny.en" when the daemon loaded `small.en`.
+- Doesn't fix Whisper's true ceiling; ADR-009 (Parakeet TDT) is still the long-term answer.
+
+---
+
 ## How to add a new ADR
 
 1. Append below the last one with the next number.

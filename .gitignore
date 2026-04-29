@@ -64,6 +64,7 @@ desktop.ini
 # Logs
 *.log
 logs/
+*.err
 
 # Insta
 **/*.snap.new

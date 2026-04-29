@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Tauri reads this file at bundle time and merges its keys into the
+        generated Info.plist (per `bundle.macOS.infoPlist` in tauri.conf.json
+        — and the Tauri 2 bundler also auto-discovers an Info.plist sitting
+        next to tauri.conf.json). Keep this file minimal: usage strings for
+        the OS-level TCC permission prompts only.
+
+        Without these strings, prod-signed builds crash the moment cpal
+        opens an input stream (NSMicrophoneUsageDescription) or enigo
+        types into the focused app (NSAccessibilityUsageDescription).
+        Input Monitoring is granted via TCC at runtime — no plist key
+        needed, but the user still has to flip the toggle in System
+        Settings → Privacy & Security → Input Monitoring for rdev's
+        global keyboard hook to fire when boothrflow isn't focused.
+    -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>boothrflow needs microphone access to capture your voice for dictation. Audio is transcribed locally and never sent to a server unless you explicitly configure a cloud LLM.</string>
+
+    <key>NSAccessibilityUsageDescription</key>
+    <string>boothrflow uses Accessibility to paste your transcribed text into the focused application after you release the dictation hotkey.</string>
+
+    <key>NSAppleEventsUsageDescription</key>
+    <string>boothrflow uses AppleEvents to detect the focused application so cleanup can match its tone (e.g., formal in Mail, casual in Slack).</string>
+</dict>
+</plist>
