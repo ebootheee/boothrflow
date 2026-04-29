@@ -20,3 +20,13 @@ export function dictationHotkeyLabel(): string {
 export function quickPasteHotkeyLabel(): string {
   return isMacPlatform() ? "Option + Cmd + H" : "Alt + Win + H";
 }
+
+/**
+ * Tap-to-toggle dictation. Different modifier set from the hold-PTT chord
+ * (Ctrl + Alt instead of Ctrl + Meta) so the rising edges don't collide
+ * — user can tap to start a hands-free session that lasts as long as
+ * they want, then tap again to end.
+ */
+export function toggleDictationHotkeyLabel(): string {
+  return isMacPlatform() ? "Ctrl + Option + Space" : "Ctrl + Alt + Space";
+}

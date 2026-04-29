@@ -191,6 +191,17 @@ objc2-app-kit = { version = "0.3", features = [
   "libc",
 ] }
 
+# Auto-enable Whisper Metal backend on Apple Silicon. The base whisper-rs
+# declaration above carries no GPU features; this target-specific override
+# adds `metal` only when compiling for aarch64-apple-darwin. Cargo merges
+# feature lists across `[dependencies]` and `[target.*.dependencies]`
+# blocks, so this is additive — no effect on Intel Macs (which still use
+# CPU unless the user opts in via `--features gpu-metal`), Windows, or
+# Linux. Net effect: `pnpm dev` on M-series produces a 5–15× faster STT
+# build out of the box without the user remembering a feature flag.
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+whisper-rs = { version = "0.16", optional = true, features = ["metal"] }
+
 [dev-dependencies]
 mockall = "0.13"
 proptest = "1.6"

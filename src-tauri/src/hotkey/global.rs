@@ -137,6 +137,19 @@ fn run_listener(tx: Sender<HotkeyEvent>) {
                     return;
                 }
             }
+            // Tap-to-toggle dictation: rising edge of Space while Ctrl + Alt
+            // (Option on macOS) held — and Meta NOT held, so it doesn't
+            // collide with the Ctrl+Meta hold-PTT chord. Different modifier
+            // set means there's no shared rising-edge to disambiguate.
+            EventType::KeyPress(Key::Space) => {
+                if cb_ctrl.load(Ordering::SeqCst)
+                    && cb_alt.load(Ordering::SeqCst)
+                    && !cb_meta.load(Ordering::SeqCst)
+                {
+                    let _ = tx.send(HotkeyEvent::ToggleDictation);
+                    return;
+                }
+            }
             _ => return,
         }
 

@@ -2,7 +2,12 @@
   import { onMount } from "svelte";
   import Icon, { type IconName } from "$lib/components/Icon.svelte";
   import ListenPill from "$lib/components/ListenPill.svelte";
-  import { dictationHotkeyLabel, isTauri, quickPasteHotkeyLabel } from "$lib/services/platform";
+  import {
+    dictationHotkeyLabel,
+    isTauri,
+    quickPasteHotkeyLabel,
+    toggleDictationHotkeyLabel,
+  } from "$lib/services/platform";
   import type { Style } from "$lib/services/styles";
   import { dictationStore } from "$lib/state/dictation.svelte";
   import { settings } from "$lib/state/settings.svelte";
@@ -34,6 +39,7 @@
   const inDesktop = isTauri();
   const dictationHotkey = dictationHotkeyLabel();
   const quickPasteHotkey = quickPasteHotkeyLabel();
+  const toggleDictationHotkey = toggleDictationHotkeyLabel();
 
   const styleOptions: Array<{ value: Style; label: string; icon: IconName }> = [
     { value: "casual", label: "Casual", icon: "pen" },
@@ -334,8 +340,13 @@
           <span class="status-dot" aria-hidden="true"></span>
           {statusLabel}
         </span>
-        <kbd><Icon name="command" size={13} /> {dictationHotkey}</kbd>
-        <kbd><Icon name="history" size={13} /> {quickPasteHotkey}</kbd>
+        <kbd title="Hold to dictate"><Icon name="command" size={13} /> {dictationHotkey}</kbd>
+        <kbd title="Tap to toggle dictation hands-free"
+          ><Icon name="zap" size={13} /> {toggleDictationHotkey}</kbd
+        >
+        <kbd title="Open quick-paste palette"
+          ><Icon name="history" size={13} /> {quickPasteHotkey}</kbd
+        >
         {#if isMac && inDesktop}
           <button
             class="quiet-button"
@@ -499,7 +510,9 @@
         {:else if liveText}
           <div class="transcript-box">{liveText}</div>
         {:else}
-          <div class="empty-panel">Hold {dictationHotkey} to dictate.</div>
+          <div class="empty-panel">
+            Hold {dictationHotkey} to dictate, or tap {toggleDictationHotkey} to toggle hands-free.
+          </div>
         {/if}
 
         <dl class="telemetry-row">

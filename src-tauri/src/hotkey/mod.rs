@@ -19,6 +19,10 @@ pub enum HotkeyEvent {
     Release,
     /// Quick-paste palette toggle (Alt+Meta+H default). Tap, not hold.
     QuickPasteOpen,
+    /// Tap-to-toggle dictation (Ctrl+Alt+Space default). Starts a session
+    /// when idle; ends it when active. Lets the user dictate longer than
+    /// they'd want to hold a key down (multi-minute dictations, hands free).
+    ToggleDictation,
 }
 
 /// Source of hotkey events. Tests use [`ScriptedHotkey`]; production uses

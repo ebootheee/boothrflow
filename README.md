@@ -38,10 +38,13 @@ pnpm ollama:pull          # qwen2.5:1.5b + nomic-embed-text
 pnpm dev
 ```
 
-First boot compiles whisper.cpp from C++ source. A Metal build can take
-longer the first time, but subsequent dev runs are much faster.
+First boot compiles whisper.cpp from C++ source. On Apple Silicon the
+Metal backend is **auto-enabled** (target.cfg in `Cargo.toml`), which
+costs an extra ~1–2 minutes on the first compile but produces a 5–15×
+faster STT runtime. Subsequent dev runs are much faster.
 
-For ~5–15× faster STT on Apple Silicon, build with the Metal backend:
+If you're on an Intel Mac, the build defaults to CPU. To force-enable
+Metal on Intel (or anywhere else), opt-in via the feature flag:
 
 ```bash
 cargo build --manifest-path src-tauri/Cargo.toml --features "real-engines gpu-metal"
@@ -63,8 +66,13 @@ new permissions are inherited. Production bundles ship with the
 matching `Info.plist` usage strings and prompt against the boothrflow
 app itself, so notarized installs don't need the relaunch dance.
 
-Hold `Ctrl + Cmd`, speak into TextEdit, release. Text pastes. Open
-quick-paste with `Option + Cmd + H`.
+**Hold to dictate**: hold `Ctrl + Cmd`, speak into TextEdit, release. Text pastes.
+
+**Tap to toggle (hands-free)**: tap `Ctrl + Option + Space` to start a
+hands-free dictation session, tap again to stop. Useful for dictations
+longer than you'd want to hold a key.
+
+Open quick-paste with `Option + Cmd + H`.
 
 ## Try it (Windows, ~5 min setup)
 
@@ -93,7 +101,10 @@ pnpm dev:msvc
 
 First boot compiles whisper.cpp from C++ source (~5–10 min). Subsequent dev runs <30s.
 
-Hold `Ctrl + Win`, speak into Notepad, release. Text pastes.
+**Hold to dictate**: hold `Ctrl + Win`, speak into Notepad, release. Text pastes.
+
+**Tap to toggle (hands-free)**: tap `Ctrl + Alt + Space` to start a
+hands-free dictation session, tap again to stop.
 
 ## Status
 

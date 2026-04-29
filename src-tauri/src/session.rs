@@ -186,10 +186,19 @@ mod real {
                         tracing::warn!("quickpaste show failed: {e}");
                     }
                 }
-                HotkeyEvent::Press => {
+                HotkeyEvent::Press | HotkeyEvent::ToggleDictation => {
                     if tray::is_paused() {
                         tracing::info!("hotkey: press ignored (paused)");
                         continue;
+                    }
+
+                    // Whether this session was started by hold-PTT (Press) or
+                    // tap-to-toggle (ToggleDictation). Doesn't change the hot
+                    // path; only used in logs + to decide which keypaths can
+                    // terminate the session in the inner loop below.
+                    let toggle_session = matches!(event, HotkeyEvent::ToggleDictation);
+                    if toggle_session {
+                        tracing::info!("hotkey: toggle-on (Ctrl+Alt+Space)");
                     }
 
                     // Per-press monotonic clock: stage at_ms timestamps and
@@ -248,11 +257,21 @@ mod real {
                             }
                         }
                         match hotkey_rx.recv_timeout(Duration::from_millis(20)) {
-                            Ok(HotkeyEvent::Release) => released = true,
+                            // Either modality terminates the session: Release
+                            // ends a hold-PTT, ToggleDictation ends a toggle.
+                            // We also accept Release in toggle sessions and
+                            // ToggleDictation in PTT sessions — preferable to
+                            // a wedged state if the user mixes chords.
+                            Ok(HotkeyEvent::Release) | Ok(HotkeyEvent::ToggleDictation) => {
+                                released = true;
+                            }
                             Ok(HotkeyEvent::Press) => {} // duplicate, ignore
                             Ok(HotkeyEvent::QuickPasteOpen) => {} // ignore mid-dictation
                             Err(_) => {}                 // timeout
                         }
+                    }
+                    if toggle_session {
+                        tracing::info!("hotkey: toggle-off");
                     }
 
                     let _ = audio.stop();

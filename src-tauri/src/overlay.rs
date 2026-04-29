@@ -14,7 +14,11 @@ use crate::error::{BoothError, Result};
 pub const LISTEN_PILL_LABEL: &str = "listen-pill";
 
 const PILL_WIDTH: f64 = 520.0;
-const PILL_HEIGHT: f64 = 74.0;
+/// Tighter chrome (status row 22 instead of 28, smaller padding) lets the
+/// partial transcript show up to two lines at the same overall pill height.
+/// 80 vs the prior 74 buys ~30px of vertical room for the partial without
+/// feeling chunky.
+const PILL_HEIGHT: f64 = 80.0;
 
 /// Build the pill window at app startup. Hidden until [`show`] is called.
 pub fn create_pill_window(app: &AppHandle) -> Result<()> {

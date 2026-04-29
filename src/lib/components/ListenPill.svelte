@@ -57,14 +57,16 @@
   });
 
   // Auto-scroll the partial row so the newest tokens stay visible as the
-  // user keeps talking. Without this, long utterances clip past the right
-  // edge and the user only sees the first sentence.
+  // user keeps talking. Now wraps to two lines and scrolls vertically —
+  // gives roughly 2× the visible context vs the prior horizontal-scroll
+  // single-line layout, which mattered for longer dictations where you
+  // want to see what you just said, not just the trailing words.
   let partialEl = $state<HTMLDivElement | null>(null);
   $effect(() => {
     void activePartial; // track changes
     if (partialEl) {
       void tick().then(() => {
-        if (partialEl) partialEl.scrollLeft = partialEl.scrollWidth;
+        if (partialEl) partialEl.scrollTop = partialEl.scrollHeight;
       });
     }
   });
@@ -179,8 +181,8 @@
 
   .root {
     display: grid;
-    grid-template-rows: 28px minmax(0, 1fr);
-    gap: 3px;
+    grid-template-rows: 22px minmax(0, 1fr);
+    gap: 4px;
     width: 100vw;
     height: 100vh;
     box-sizing: border-box;
@@ -198,7 +200,7 @@
       "Segoe UI",
       system-ui,
       sans-serif;
-    padding: 9px 14px 10px;
+    padding: 7px 13px 8px;
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
   }
@@ -261,16 +263,20 @@
   .partial-row {
     display: block;
     min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
+    /* Two-line wrap with vertical scroll. The auto-scroll-to-bottom keeps
+       the newest sentence in view; older lines fall up off the top as the
+       user keeps speaking. Word-break covers very long unbroken tokens
+       (URLs, file paths) so they wrap instead of forcing a horizontal
+       scrollbar. */
+    overflow-x: hidden;
+    overflow-y: auto;
     color: rgba(247, 251, 249, 0.92);
     font-size: 12px;
     font-weight: 650;
     letter-spacing: 0;
-    line-height: 1.25;
-    white-space: nowrap;
-    /* Hide the horizontal scrollbar — the auto-scroll keeps the newest
-       tokens in view as the user keeps speaking. */
+    line-height: 1.3;
+    white-space: normal;
+    word-break: break-word;
     scrollbar-width: none;
   }
 
