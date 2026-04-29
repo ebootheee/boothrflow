@@ -6,6 +6,7 @@
     type DictationLifecycle,
     type PartialPayload,
   } from "$lib/state/dictation.svelte";
+  import { dictationHotkeyLabel } from "$lib/services/platform";
 
   type Props = {
     lifecycle?: DictationLifecycle;
@@ -18,7 +19,7 @@
     lifecycle = undefined,
     partial = undefined,
     atMs = undefined,
-    hotkey = platformHotkey(),
+    hotkey = dictationHotkeyLabel(),
   }: Props = $props();
 
   const activeLifecycle = $derived(lifecycle ?? dictationStore.lifecycle);
@@ -30,13 +31,6 @@
   onMount(() => {
     void dictationStore.attach();
   });
-
-  function platformHotkey(): string {
-    if (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform)) {
-      return "Ctrl + Cmd";
-    }
-    return "Ctrl + Win";
-  }
 
   function stageMeta(state: DictationLifecycle): {
     label: string;

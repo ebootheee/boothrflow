@@ -1,4 +1,4 @@
-# Wave 3 — macOS Port (status: planned, starts after Wave 2 UAT)
+# Wave 3 — macOS Port (status: in progress on `feat/wave-3-mac`)
 
 Wave 3 takes the Windows-working dictation pipeline and makes it run
 natively on macOS (Apple Silicon priority; Intel best-effort). It is
@@ -28,7 +28,10 @@ Toolchain:
 
 - Xcode Command Line Tools: `xcode-select --install`
 - Rust via rustup; nightly not required.
-- Node 20+ via `nvm` or `mise`; pnpm via `corepack enable`.
+- Node 22+ via `nvm` or `mise`; pnpm via `corepack enable`.
+- CMake for whisper.cpp native builds: `brew install cmake`.
+- Ollama for the LLM cleanup and embedding endpoints:
+  `brew install ollama && brew services start ollama`.
 - LLVM (for whisper-rs bindgen). On macOS the system clang ships with
   CLT and works; if bindgen complains, `brew install llvm` and set
   `LIBCLANG_PATH=$(brew --prefix llvm)/lib`.
@@ -166,9 +169,9 @@ Verify on first build:
 (`~/Library/Application Support`). The model goes to
 `~/Library/Application Support/boothrflow/models/ggml-tiny.en.bin`.
 The first-run download script is `scripts/download-model.bat` on
-Windows; we need a parallel `scripts/download-model.sh`. Keep the
-same model-name shortcuts (tiny / base / small / medium /
-large-v3-turbo).
+Windows; Wave 3 adds the parallel `scripts/download-model.sh` and
+`pnpm download:model:mac`. It keeps the same model-name shortcuts
+(tiny / base / small / medium / large-v3-turbo).
 
 ## #9 — LLM endpoint (Ollama on Mac)
 
@@ -176,6 +179,16 @@ No code change. Ollama on Mac listens on the same `localhost:11434`
 by default. The `BOOTHRFLOW_LLM_*` env vars work identically. Just
 confirm in the Wave 3 UAT that the OpenAI-compat path still hits the
 prewarm + chat completions correctly through Mac's networking stack.
+
+UAT setup should pull both local Ollama models used by the current
+branch:
+
+```bash
+pnpm ollama:pull
+```
+
+That pulls `qwen2.5:1.5b` for cleanup and `nomic-embed-text` for
+history embeddings.
 
 ## #10 — Code signing + notarization (basic)
 
@@ -219,6 +232,17 @@ this if the user grants permissions on demand. UX is just rougher.
 ## Wave 3 UAT — what to test on the Mac
 
 Same suite as Wave 2 plus the platform sanity items:
+
+Pre-flight:
+
+```bash
+brew services start ollama
+pnpm download:model:mac
+pnpm ollama:pull
+pnpm dev
+```
+
+Then:
 
 1. Hold Ctrl+Cmd, dictate, release. Pill stays visible through paste.
 2. State transitions fire in the same order; `dictation:done` carries

@@ -22,7 +22,7 @@ pub fn create_pill_window(app: &AppHandle) -> Result<()> {
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         LISTEN_PILL_LABEL,
         WebviewUrl::App("index.html#listen-pill".into()),
@@ -39,10 +39,12 @@ pub fn create_pill_window(app: &AppHandle) -> Result<()> {
     .build()
     .map_err(|e| BoothError::internal(format!("create pill: {e}")))?;
 
+    let _ = window.set_ignore_cursor_events(true);
+
     Ok(())
 }
 
-/// Show the pill, positioned at bottom-center of the primary monitor.
+/// Show the pill, positioned above the dock/taskbar in the current work area.
 pub fn show(app: &AppHandle) -> Result<()> {
     let Some(window) = app.get_webview_window(LISTEN_PILL_LABEL) else {
         return Err(BoothError::internal("listen-pill window not found"));
@@ -55,14 +57,13 @@ pub fn show(app: &AppHandle) -> Result<()> {
         .or_else(|| window.primary_monitor().ok().flatten())
     {
         let scale = monitor.scale_factor();
-        let monitor_size = monitor.size();
-        let monitor_pos = monitor.position();
+        let work_area = monitor.work_area();
 
-        let logical_w = monitor_size.width as f64 / scale;
-        let logical_h = monitor_size.height as f64 / scale;
+        let logical_w = work_area.size.width as f64 / scale;
+        let logical_h = work_area.size.height as f64 / scale;
 
-        let x = monitor_pos.x as f64 / scale + (logical_w - PILL_WIDTH) / 2.0;
-        let y = monitor_pos.y as f64 / scale + logical_h - PILL_HEIGHT - 80.0;
+        let x = work_area.position.x as f64 / scale + (logical_w - PILL_WIDTH) / 2.0;
+        let y = work_area.position.y as f64 / scale + logical_h - PILL_HEIGHT - 24.0;
 
         let _ = window.set_size(LogicalSize::new(PILL_WIDTH, PILL_HEIGHT));
         let _ = window.set_position(tauri::LogicalPosition::new(x, y));

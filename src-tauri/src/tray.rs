@@ -41,7 +41,10 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
 
     TrayIconBuilder::with_id("boothrflow-tray")
         .icon(icon)
-        .tooltip("boothrflow — idle (Ctrl+Win to dictate)")
+        .tooltip(format!(
+            "boothrflow — idle ({} to dictate)",
+            dictation_hotkey_label()
+        ))
         .menu(&menu)
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "open" => {
@@ -56,9 +59,12 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
                 let _ = pause_for_menu.set_text(if now_paused { "Resume" } else { "Pause" });
                 if let Some(tray) = app.tray_by_id("boothrflow-tray") {
                     let _ = tray.set_tooltip(Some(if now_paused {
-                        "boothrflow — paused"
+                        "boothrflow — paused".to_string()
                     } else {
-                        "boothrflow — idle (Ctrl+Win to dictate)"
+                        format!(
+                            "boothrflow — idle ({} to dictate)",
+                            dictation_hotkey_label()
+                        )
                     }));
                 }
             }
@@ -90,11 +96,14 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
 pub fn set_listening(app: &AppHandle, listening: bool) {
     if let Some(tray) = app.tray_by_id("boothrflow-tray") {
         let label = if PAUSED.load(Ordering::SeqCst) {
-            "boothrflow — paused"
+            "boothrflow — paused".to_string()
         } else if listening {
-            "boothrflow — listening"
+            "boothrflow — listening".to_string()
         } else {
-            "boothrflow — idle (Ctrl+Win to dictate)"
+            format!(
+                "boothrflow — idle ({} to dictate)",
+                dictation_hotkey_label()
+            )
         };
         let _ = tray.set_tooltip(Some(label));
     }
@@ -102,4 +111,15 @@ pub fn set_listening(app: &AppHandle, listening: bool) {
 
 pub fn is_paused() -> bool {
     PAUSED.load(Ordering::SeqCst)
+}
+
+fn dictation_hotkey_label() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Ctrl+Cmd"
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "Ctrl+Win"
+    }
 }

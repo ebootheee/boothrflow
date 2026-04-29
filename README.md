@@ -10,6 +10,43 @@ An open-source replacement for [Wispr Flow](https://wisprflow.ai/), built around
 
 **Status:** pre-alpha. Phase 1 hot path (mic → Whisper STT → paste) is working; Phase 2 (LLM cleanup, styles, app-context) is next. See [`ROADMAP.md`](./ROADMAP.md).
 
+## Try it (macOS, Wave 3 branch)
+
+Wave 3 targets Apple Silicon first and Intel macOS best-effort.
+
+```bash
+# 1. Install dev dependencies (one-time)
+xcode-select --install
+# Install Rust stable via https://rustup.rs and Node 22+ via nvm, mise, or Homebrew.
+brew install cmake ollama
+brew services start ollama
+
+# 2. Clone + install JS deps
+git clone https://github.com/ebootheee/boothrflow
+cd boothrflow
+git checkout feat/wave-3-mac
+corepack enable
+pnpm install
+
+# 3. Download local models
+pnpm download:model:mac   # Whisper tiny.en, ~75MB
+pnpm ollama:pull          # qwen2.5:1.5b + nomic-embed-text
+
+# 4. Boot
+pnpm dev
+```
+
+First boot compiles whisper.cpp from C++ source. A Metal build can take
+longer the first time, but subsequent dev runs are much faster.
+
+Grant macOS permissions when prompted:
+
+- **Accessibility** for global hotkeys and paste injection.
+- **Microphone** for audio capture.
+
+Hold `Ctrl + Cmd`, speak into TextEdit, release. Text pastes. Open
+quick-paste with `Option + Cmd + H`.
+
 ## Try it (Windows, ~5 min setup)
 
 ```powershell
@@ -51,7 +88,8 @@ Hold `Ctrl + Win`, speak into Notepad, release. Text pastes.
 | **P2 W4**: LLM cleanup (OpenAI-compat HTTP) + style picker | Done — needs Ollama or compat server |
 | **P2 W5**: app-context detection                           | Next                                 |
 | Memory / history                                           | Phase 3                              |
-| Mac + Linux                                                | Phase 4                              |
+| **Wave 3**: macOS port                                     | In progress on `feat/wave-3-mac`     |
+| Linux                                                      | Phase 4                              |
 
 ## Documentation
 
@@ -115,9 +153,34 @@ scripts\cargo-msvc.bat pnpm exec tauri dev
 
 `pnpm dev:msvc`, `pnpm build:msvc`, `pnpm test:rust:real` use the wrapper. The fast inner-loop fakes-only path (`pnpm test:rust`, `pnpm test:fe`) works in any shell because `test-fakes` doesn't compile the heavy native deps.
 
-### macOS / Linux
+### macOS
 
-`pnpm dev`, `pnpm test:rust:real` work directly — clang and SDK headers are auto-discovered. (Windows is the awkward one because bindgen wants the SDK paths set up before invocation.)
+Install Xcode Command Line Tools, `cmake`, and Ollama:
+
+```bash
+xcode-select --install
+brew install cmake ollama
+brew services start ollama
+pnpm download:model:mac
+pnpm ollama:pull
+```
+
+`pnpm dev`, `pnpm test:rust:real`, and plain `cargo check --features
+real-engines` work directly — clang and SDK headers are auto-discovered.
+If bindgen cannot find libclang, `brew install llvm` and set
+`LIBCLANG_PATH=$(brew --prefix llvm)/lib`.
+
+macOS uses `Ctrl + Cmd` for hold-to-talk and `Option + Cmd + H` for
+quick-paste. If the hotkey or paste does nothing, grant Accessibility
+permission in `System Settings → Privacy & Security → Accessibility`.
+If audio capture fails, grant Microphone permission in the same Privacy
+& Security panel.
+
+### Linux
+
+`pnpm dev`, `pnpm test:rust:real`, and `pnpm download:model:linux`
+are the intended bring-up path. Linux-specific focus restore and tray
+polish land in Wave 4.
 
 ## Contributing
 

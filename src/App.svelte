@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import Icon, { type IconName } from "$lib/components/Icon.svelte";
   import ListenPill from "$lib/components/ListenPill.svelte";
-  import { isTauri } from "$lib/services/platform";
+  import { dictationHotkeyLabel, isTauri, quickPasteHotkeyLabel } from "$lib/services/platform";
   import type { Style } from "$lib/services/styles";
   import { dictationStore } from "$lib/state/dictation.svelte";
   import { settings } from "$lib/state/settings.svelte";
@@ -32,6 +32,8 @@
   const isPill = hash === "#listen-pill";
   const isQuickPaste = hash === "#quick-paste";
   const inDesktop = isTauri();
+  const dictationHotkey = dictationHotkeyLabel();
+  const quickPasteHotkey = quickPasteHotkeyLabel();
 
   const styleOptions: Array<{ value: Style; label: string; icon: IconName }> = [
     { value: "casual", label: "Casual", icon: "pen" },
@@ -228,8 +230,8 @@
           <span class="status-dot" aria-hidden="true"></span>
           {statusLabel}
         </span>
-        <kbd><Icon name="command" size={13} /> Ctrl + Win</kbd>
-        <kbd><Icon name="history" size={13} /> Alt + Win + H</kbd>
+        <kbd><Icon name="command" size={13} /> {dictationHotkey}</kbd>
+        <kbd><Icon name="history" size={13} /> {quickPasteHotkey}</kbd>
       </div>
     </header>
 
@@ -288,7 +290,7 @@
         {:else if liveText}
           <div class="transcript-box">{liveText}</div>
         {:else}
-          <div class="empty-panel">Hold Ctrl + Win to dictate.</div>
+          <div class="empty-panel">Hold {dictationHotkey} to dictate.</div>
         {/if}
 
         <dl class="telemetry-row">

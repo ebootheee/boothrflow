@@ -8,3 +8,15 @@
 export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
+
+export function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+}
+
+export function dictationHotkeyLabel(): string {
+  return isMacPlatform() ? "Ctrl + Cmd" : "Ctrl + Win";
+}
+
+export function quickPasteHotkeyLabel(): string {
+  return isMacPlatform() ? "Option + Cmd + H" : "Alt + Win + H";
+}

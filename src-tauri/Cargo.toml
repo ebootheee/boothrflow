@@ -184,6 +184,13 @@ windows = { version = "0.58", features = [
   "Win32_Foundation",
 ] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", features = [
+  "NSRunningApplication",
+  "NSWorkspace",
+  "libc",
+] }
+
 [dev-dependencies]
 mockall = "0.13"
 proptest = "1.6"

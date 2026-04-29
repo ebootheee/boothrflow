@@ -1,5 +1,5 @@
 import type { Style } from "$lib/services/styles";
-import { isTauri } from "$lib/services/platform";
+import { dictationHotkeyLabel, isTauri } from "$lib/services/platform";
 
 type SettingsState = {
   style: Style;
@@ -25,7 +25,7 @@ async function pushStyleToBackend(style: Style) {
 function createSettings() {
   const state = $state<SettingsState>({
     style: "casual",
-    hotkey: "Ctrl+Win",
+    hotkey: dictationHotkeyLabel(),
     llmEnabled: true,
     privacyMode: false,
   });

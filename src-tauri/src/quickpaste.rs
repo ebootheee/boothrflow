@@ -9,10 +9,8 @@
 //! ClipboardInjector. Without this dance, paste lands inside the palette.
 //!
 //! Cross-platform: the focus-snapshot is Windows-only for v0; macOS/Linux
-//! ports defer to P4. Without the snapshot the paste still happens, just
-//! into whatever's focused at the time (usually the palette itself, which
-//! is wrong — so on non-Windows the palette doesn't auto-restore focus
-//! and the user has to alt-tab manually).
+//! uses `NSWorkspace.frontmostApplication` / `NSRunningApplication.activate`.
+//! Linux remains a no-op until its own port.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -25,9 +23,10 @@ pub const QUICK_PASTE_LABEL: &str = "quick-paste";
 const PALETTE_WIDTH: f64 = 560.0;
 const PALETTE_HEIGHT: f64 = 360.0;
 
-/// Stash for the foreground HWND captured at the moment the hotkey fired.
-/// Read on paste, cleared on close. 0 means "not set".
-static TARGET_HWND: AtomicI64 = AtomicI64::new(0);
+/// Stash for the target captured at the moment the hotkey fired. On Windows
+/// this is an HWND; on macOS it is a pid. Read and cleared on restore.
+/// 0 means "not set".
+static TARGET_WINDOW: AtomicI64 = AtomicI64::new(0);
 
 pub fn create_quickpaste_window(app: &AppHandle) -> Result<()> {
     if app.get_webview_window(QUICK_PASTE_LABEL).is_some() {
@@ -56,15 +55,25 @@ pub fn create_quickpaste_window(app: &AppHandle) -> Result<()> {
 }
 
 /// Capture the foreground window so we know where to paste back.
-/// On non-Windows builds this is a no-op; the user pastes wherever
-/// focus lands when they pick an entry.
+/// On Linux this is a no-op until Wave 4.
 pub fn capture_target_window() {
     #[cfg(windows)]
     {
         use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
         let hwnd = unsafe { GetForegroundWindow() };
-        TARGET_HWND.store(hwnd.0 as i64, Ordering::SeqCst);
+        TARGET_WINDOW.store(hwnd.0 as i64, Ordering::SeqCst);
         tracing::debug!("quickpaste: captured target hwnd={}", hwnd.0 as i64);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSWorkspace;
+
+        let workspace = NSWorkspace::sharedWorkspace();
+        if let Some(app) = workspace.frontmostApplication() {
+            let pid = app.processIdentifier() as i64;
+            TARGET_WINDOW.store(pid, Ordering::SeqCst);
+            tracing::debug!("quickpaste: captured target pid={pid}");
+        }
     }
 }
 
@@ -72,7 +81,7 @@ pub fn capture_target_window() {
 /// valid stash to restore. Cleared after restore so a stale value can't
 /// hijack a subsequent paste.
 pub fn restore_target_window() -> bool {
-    let raw = TARGET_HWND.swap(0, Ordering::SeqCst);
+    let raw = TARGET_WINDOW.swap(0, Ordering::SeqCst);
     if raw == 0 {
         return false;
     }
@@ -80,7 +89,7 @@ pub fn restore_target_window() -> bool {
     {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
-            SetForegroundWindow, AllowSetForegroundWindow,
+            AllowSetForegroundWindow, SetForegroundWindow,
         };
         // ASFW_ANY = u32::MAX
         let _ = unsafe { AllowSetForegroundWindow(u32::MAX) };
@@ -89,7 +98,20 @@ pub fn restore_target_window() -> bool {
         tracing::debug!("quickpaste: restore hwnd={raw} → {}", ok.as_bool());
         ok.as_bool()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+
+        let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(raw as _)
+        else {
+            tracing::debug!("quickpaste: target pid={raw} no longer running");
+            return false;
+        };
+        let ok = app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+        tracing::debug!("quickpaste: restore pid={raw} → {ok}");
+        ok
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = raw;
         false
@@ -108,14 +130,13 @@ pub fn show(app: &AppHandle) -> Result<()> {
         .or_else(|| window.primary_monitor().ok().flatten())
     {
         let scale = monitor.scale_factor();
-        let monitor_size = monitor.size();
-        let monitor_pos = monitor.position();
+        let work_area = monitor.work_area();
 
-        let logical_w = monitor_size.width as f64 / scale;
-        let logical_h = monitor_size.height as f64 / scale;
+        let logical_w = work_area.size.width as f64 / scale;
+        let logical_h = work_area.size.height as f64 / scale;
 
-        let x = monitor_pos.x as f64 / scale + (logical_w - PALETTE_WIDTH) / 2.0;
-        let y = monitor_pos.y as f64 / scale + (logical_h - PALETTE_HEIGHT) / 3.0;
+        let x = work_area.position.x as f64 / scale + (logical_w - PALETTE_WIDTH) / 2.0;
+        let y = work_area.position.y as f64 / scale + (logical_h - PALETTE_HEIGHT) / 3.0;
 
         let _ = window.set_size(LogicalSize::new(PALETTE_WIDTH, PALETTE_HEIGHT));
         let _ = window.set_position(tauri::LogicalPosition::new(x, y));
@@ -134,6 +155,5 @@ pub fn hide(app: &AppHandle) -> Result<()> {
             .hide()
             .map_err(|e| BoothError::internal(format!("hide quick-paste: {e}")))?;
     }
-    TARGET_HWND.store(0, Ordering::SeqCst);
     Ok(())
 }

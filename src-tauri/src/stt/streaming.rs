@@ -26,9 +26,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use parking_lot::Mutex;
 use serde::Serialize;
-use whisper_rs::{
-    FullParams, SamplingStrategy, WhisperContext, WhisperState,
-};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperState};
 
 use crate::error::{BoothError, Result};
 
@@ -191,10 +189,7 @@ fn worker_loop(
         };
         let elapsed = started.elapsed().as_millis() as u64;
 
-        let tokens: Vec<String> = text
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect();
+        let tokens: Vec<String> = text.split_whitespace().map(|s| s.to_string()).collect();
 
         let (committed, tentative) = {
             let mut g = inner.lock();

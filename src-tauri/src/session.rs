@@ -216,19 +216,20 @@ mod real {
                     // Streaming partials. Optional — if the worker fails to
                     // spawn we just don't emit partials; the final pass still
                     // produces the same transcript on release.
-                    let streaming = stt.as_ref().and_then(|engine| {
-                        match StreamingTranscriber::spawn(
-                            engine.shared_context(),
-                            engine.initial_prompt().map(|s| s.to_string()),
-                            dictation_started,
-                        ) {
-                            Ok(s) => Some(s),
-                            Err(e) => {
-                                tracing::warn!("streaming disabled: {e}");
-                                None
+                    let streaming =
+                        stt.as_ref().and_then(|engine| {
+                            match StreamingTranscriber::spawn(
+                                engine.shared_context(),
+                                engine.initial_prompt().map(|s| s.to_string()),
+                                dictation_started,
+                            ) {
+                                Ok(s) => Some(s),
+                                Err(e) => {
+                                    tracing::warn!("streaming disabled: {e}");
+                                    None
+                                }
                             }
-                        }
-                    });
+                        });
 
                     let mut frames: Vec<AudioFrame> = Vec::new();
                     let mut released = false;
@@ -250,7 +251,7 @@ mod real {
                             Ok(HotkeyEvent::Release) => released = true,
                             Ok(HotkeyEvent::Press) => {} // duplicate, ignore
                             Ok(HotkeyEvent::QuickPasteOpen) => {} // ignore mid-dictation
-                            Err(_) => {}                          // timeout
+                            Err(_) => {}                 // timeout
                         }
                     }
 
