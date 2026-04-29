@@ -29,7 +29,9 @@ corepack enable
 pnpm install
 
 # 3. Download local models
-pnpm download:model:mac   # Whisper tiny.en, ~75MB
+pnpm download:model:mac   # Whisper tiny.en, ~75MB. For better quality:
+                          #   pnpm download:model:mac small  (≈466MB)
+                          # then `export BOOTHRFLOW_WHISPER_MODEL_FILE=ggml-small.en.bin`
 pnpm ollama:pull          # qwen2.5:1.5b + nomic-embed-text
 
 # 4. Boot
@@ -39,10 +41,27 @@ pnpm dev
 First boot compiles whisper.cpp from C++ source. A Metal build can take
 longer the first time, but subsequent dev runs are much faster.
 
-Grant macOS permissions when prompted:
+For ~5–15× faster STT on Apple Silicon, build with the Metal backend:
 
-- **Accessibility** for global hotkeys and paste injection.
-- **Microphone** for audio capture.
+```bash
+cargo build --manifest-path src-tauri/Cargo.toml --features "real-engines gpu-metal"
+```
+
+### macOS permissions
+
+The app needs three macOS privileges. The topbar has a **Permissions**
+panel with one-click links to each System Settings pane:
+
+- **Microphone** — required for audio capture (`cpal`).
+- **Accessibility** — required for paste injection (`enigo`).
+- **Input Monitoring** — required for the global hotkey (`rdev` /
+  `CGEventTap`) to fire when boothrflow isn't focused.
+
+In dev mode (`pnpm dev`), macOS attributes the prompts to the parent
+terminal — after granting, **quit and relaunch the terminal** so the
+new permissions are inherited. Production bundles ship with the
+matching `Info.plist` usage strings and prompt against the boothrflow
+app itself, so notarized installs don't need the relaunch dance.
 
 Hold `Ctrl + Cmd`, speak into TextEdit, release. Text pastes. Open
 quick-paste with `Option + Cmd + H`.
@@ -87,8 +106,9 @@ Hold `Ctrl + Win`, speak into Notepad, release. Text pastes.
 | **P1 W3**: paste injection + tray                          | Done                                 |
 | **P2 W4**: LLM cleanup (OpenAI-compat HTTP) + style picker | Done — needs Ollama or compat server |
 | **P2 W5**: app-context detection                           | Next                                 |
-| Memory / history                                           | Phase 3                              |
-| **Wave 3**: macOS port                                     | In progress on `feat/wave-3-mac`     |
+| Memory / history                                           | Done                                 |
+| **Wave 3**: macOS port                                     | Done — UAT polish landed             |
+| **Phase 2 backlog**: structured/app-aware formatting       | Roadmapped (see ROADMAP.md)          |
 | Linux                                                      | Phase 4                              |
 
 ## Documentation

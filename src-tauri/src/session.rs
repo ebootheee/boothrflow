@@ -369,7 +369,12 @@ mod real {
         // back to raw transcript on any LLM failure.
         emit_stage(app, "cleaning", dictation_started);
         let style = settings::current_style();
-        let (formatted, llm_ms) = run_llm_cleanup(&stt_result.text, style, llm);
+        let (formatted, llm_ms, llm_err) = run_llm_cleanup(&stt_result.text, style, llm);
+        if let Some(err) = llm_err {
+            // Surface so the UI can show "Cleanup unavailable — using raw"
+            // instead of silently displaying 0 ms.
+            let _ = app.emit("dictation:llm-missing", err);
+        }
 
         if formatted != stt_result.text {
             let _ = app.emit(
@@ -428,21 +433,24 @@ mod real {
         );
     }
 
-    /// Returns the post-cleanup string and elapsed ms (0 if LLM was skipped).
+    /// Returns `(formatted, elapsed_ms, error)`. `error` is `Some` only when
+    /// the cleanup pass tried to run and the call failed — so the UI can
+    /// distinguish "0 ms because LLM was skipped" (short utterance / raw
+    /// style / disabled) from "0 ms because Ollama is down".
     fn run_llm_cleanup(
         raw: &str,
         style: settings::Style,
         llm: Option<&OpenAiCompatLlmCleanup>,
-    ) -> (String, u64) {
+    ) -> (String, u64, Option<String>) {
         // Hard skips: explicit raw style, no LLM loaded, very short utterance.
         if matches!(style, settings::Style::Raw) {
-            return (raw.to_string(), 0);
+            return (raw.to_string(), 0, None);
         }
         let Some(llm) = llm else {
-            return (raw.to_string(), 0);
+            return (raw.to_string(), 0, None);
         };
         if should_skip_llm(raw, true) {
-            return (raw.to_string(), 0);
+            return (raw.to_string(), 0, None);
         }
 
         let started = std::time::Instant::now();
@@ -454,11 +462,11 @@ mod real {
             Ok(text) => {
                 let ms = started.elapsed().as_millis() as u64;
                 tracing::info!("llm cleanup ({ms} ms): \"{raw}\" → \"{text}\"");
-                (text, ms)
+                (text, ms, None)
             }
             Err(e) => {
                 tracing::error!("llm cleanup failed, falling back to raw: {e}");
-                (raw.to_string(), 0)
+                (raw.to_string(), 0, Some(e.to_string()))
             }
         }
     }

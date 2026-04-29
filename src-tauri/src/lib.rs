@@ -31,7 +31,9 @@ pub mod stt;
 pub mod tray;
 pub mod vad;
 
-use commands::{dictate_once, set_dictation_style};
+use commands::{
+    dictate_once, microphone_available, open_macos_setting, set_dictation_style, whisper_model_name,
+};
 #[cfg(feature = "real-engines")]
 use tauri::Manager;
 
@@ -91,12 +93,20 @@ pub fn run() {
             history_paste,
             quickpaste_paste,
             quickpaste_close,
+            open_macos_setting,
+            microphone_available,
+            whisper_model_name,
         ]);
     }
     #[cfg(not(feature = "real-engines"))]
     {
-        builder =
-            builder.invoke_handler(tauri::generate_handler![dictate_once, set_dictation_style]);
+        builder = builder.invoke_handler(tauri::generate_handler![
+            dictate_once,
+            set_dictation_style,
+            open_macos_setting,
+            microphone_available,
+            whisper_model_name,
+        ]);
     }
     builder
         .setup(move |app| {

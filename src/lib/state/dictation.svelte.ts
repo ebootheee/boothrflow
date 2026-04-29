@@ -54,6 +54,17 @@ type DictationState = {
   lastPartial: PartialPayload | null;
   lastError: string | null;
   modelMissing: string | null;
+  /**
+   * Set when the LLM endpoint is unreachable (Ollama down, etc.) so the UI
+   * can show a "cleanup skipped, using raw" notice. Cleared on the next
+   * successful dictation.
+   */
+  llmMissing: string | null;
+  /**
+   * Whether the most recent dictation actually ran the LLM cleanup pass.
+   * Lets the UI distinguish "0 ms because skipped" from "0 ms because off".
+   */
+  lastLlmRan: boolean;
   history: SttResultPayload[];
 };
 
@@ -73,6 +84,8 @@ function createDictationStore() {
     lastPartial: null,
     lastError: null,
     modelMissing: null,
+    llmMissing: null,
+    lastLlmRan: false,
     history: [],
   });
 
@@ -89,6 +102,10 @@ function createDictationStore() {
       state.at_ms = 0;
       state.lastError = null;
       state.lastPartial = null;
+      // Optimistic — cleared per dictation; re-set if the daemon emits
+      // llm-missing during the run.
+      state.lastLlmRan = false;
+      state.llmMissing = null;
     });
 
     await listen<PartialPayload>("dictation:partial", (e) => {
@@ -116,6 +133,13 @@ function createDictationStore() {
       state.lastDone = e.payload;
     });
 
+    await listen("dictation:formatted", () => {
+      // The daemon only emits `dictation:formatted` when LLM cleanup actually
+      // produced different text from the raw transcript — strong signal the
+      // cleanup pass ran.
+      state.lastLlmRan = true;
+    });
+
     await listen<string>("dictation:error", (e) => {
       state.lifecycle = "idle";
       state.lastError = e.payload;
@@ -123,6 +147,10 @@ function createDictationStore() {
 
     await listen<string>("dictation:model-missing", (e) => {
       state.modelMissing = e.payload;
+    });
+
+    await listen<string>("dictation:llm-missing", (e) => {
+      state.llmMissing = e.payload;
     });
   }
 
@@ -153,6 +181,12 @@ function createDictationStore() {
     },
     get modelMissing() {
       return state.modelMissing;
+    },
+    get llmMissing() {
+      return state.llmMissing;
+    },
+    get lastLlmRan() {
+      return state.lastLlmRan;
     },
     get history() {
       return state.history;

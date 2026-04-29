@@ -98,6 +98,54 @@
   let historyLoading = $state(false);
   let historyError = $state<string | null>(null);
   let selectedHistoryId = $state<number | null>(null);
+  // macOS permissions flow. The Info.plist usage strings make prod builds
+  // prompt at first capture, but in dev (`tauri dev`) the prompt is
+  // attributed to the parent terminal and the user has to relaunch it
+  // after granting. We probe the mic on load and surface the State Settings
+  // panes on demand so the user isn't hunting through System Preferences.
+  const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+  let micAvailable = $state<boolean | null>(null);
+  let permissionsOpen = $state(false);
+  let permissionsDismissed = $state(false);
+
+  async function probeMicrophone() {
+    if (!inDesktop) {
+      micAvailable = true;
+      return;
+    }
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      micAvailable = await invoke<boolean>("microphone_available");
+    } catch {
+      micAvailable = false;
+    }
+  }
+
+  let whisperModel = $state("ggml-tiny.en");
+  async function probeWhisperModel() {
+    if (!inDesktop) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      whisperModel = await invoke<string>("whisper_model_name");
+    } catch {
+      // Stay on the default label.
+    }
+  }
+  function whisperLabel(name: string): string {
+    // ggml-tiny.en → "tiny.en", ggml-large-v3-turbo → "large-v3-turbo"
+    return name.replace(/^ggml-/, "");
+  }
+
+  type PermissionPane = "microphone" | "accessibility" | "input_monitoring";
+  async function openPermissionPane(pane: PermissionPane) {
+    if (!inDesktop) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_macos_setting", { pane });
+    } catch (e) {
+      console.warn("open_macos_setting failed:", e);
+    }
+  }
 
   const displayHistory = $derived(
     historyEntries.length ? historyEntries : inDesktop ? [] : demoHistory,
@@ -107,9 +155,47 @@
   );
   const displayStats = $derived(historyStats ?? (inDesktop ? null : demoStats));
   const liveText = $derived(dictationStore.lastResult?.text ?? selectedEntry?.formatted ?? "");
-  const sttMs = $derived(selectedEntry?.duration_ms ?? dictationStore.lastResult?.duration_ms ?? 0);
-  const llmMs = $derived(selectedEntry?.llm_ms ?? 0);
+  // Prefer live telemetry from the most recent dictation; fall back to the
+  // selected history entry. Without this, the "Current" panel keeps showing
+  // an old entry's timings even after a fresh dictation completes (which
+  // hadn't yet been pulled into `historyEntries`), so the user saw 0 ms LLM
+  // until they hit Refresh.
+  const sttMs = $derived(
+    dictationStore.lastDone?.stt_ms ??
+      selectedEntry?.duration_ms ??
+      dictationStore.lastResult?.duration_ms ??
+      0,
+  );
+  const llmMs = $derived(dictationStore.lastDone?.llm_ms ?? selectedEntry?.llm_ms ?? 0);
   const totalMs = $derived(sttMs + llmMs);
+  // "0 ms" is ambiguous — distinguish skipped (raw / short / disabled) from
+  // failed (Ollama unreachable) so the UI doesn't read like a regression.
+  const llmStatus = $derived<"ran" | "skipped-raw" | "skipped-short" | "unreachable" | "idle">(
+    dictationStore.llmMissing
+      ? "unreachable"
+      : settings.style === "raw"
+        ? "skipped-raw"
+        : llmMs > 0
+          ? "ran"
+          : dictationStore.lastDone
+            ? "skipped-short"
+            : "idle",
+  );
+  function llmDisplay(): string {
+    switch (llmStatus) {
+      case "ran":
+        return formatMs(llmMs);
+      case "skipped-raw":
+        return "off (raw)";
+      case "skipped-short":
+        return "skipped";
+      case "unreachable":
+        return "unreachable";
+      case "idle":
+      default:
+        return llmMs ? formatMs(llmMs) : "0 ms";
+    }
+  }
   const captureSeconds = $derived(
     dictationStore.lastSummary?.seconds ?? (selectedEntry ? selectedEntry.duration_ms / 1000 : 0),
   );
@@ -202,6 +288,24 @@
   onMount(() => {
     void dictationStore.attach();
     void loadHistory();
+    void probeMicrophone();
+    void probeWhisperModel();
+  });
+
+  // Refresh history whenever a fresh dictation completes so the new entry
+  // surfaces (with correct stt/llm timings from the DB record) without the
+  // user having to hit Refresh.
+  let lastSeenDoneAt = 0;
+  $effect(() => {
+    const done = dictationStore.lastDone;
+    if (!done || !inDesktop) return;
+    // total_ms is monotonic per dictation; use it as a change signal so we
+    // don't loop on selectedHistoryId writes.
+    if (done.total_ms === lastSeenDoneAt) return;
+    lastSeenDoneAt = done.total_ms;
+    void loadHistory().then(() => {
+      if (historyEntries[0]) selectedHistoryId = historyEntries[0].id;
+    });
   });
 </script>
 
@@ -232,6 +336,15 @@
         </span>
         <kbd><Icon name="command" size={13} /> {dictationHotkey}</kbd>
         <kbd><Icon name="history" size={13} /> {quickPasteHotkey}</kbd>
+        {#if isMac && inDesktop}
+          <button
+            class="quiet-button"
+            type="button"
+            onclick={() => (permissionsOpen = !permissionsOpen)}
+          >
+            <Icon name="lock" size={13} /> Permissions
+          </button>
+        {/if}
       </div>
     </header>
 
@@ -242,6 +355,97 @@
           <strong>Whisper model missing</strong>
           <pre>{dictationStore.modelMissing}</pre>
         </div>
+      </section>
+    {/if}
+
+    {#if dictationStore.llmMissing}
+      <section class="notice" aria-live="polite">
+        <Icon name="brain" size={15} />
+        <div>
+          <strong>Cleanup model unreachable — using raw transcript</strong>
+          <pre>{dictationStore.llmMissing}</pre>
+        </div>
+      </section>
+    {/if}
+
+    {#if isMac && inDesktop && micAvailable === false && !permissionsDismissed}
+      <section class="notice" aria-live="polite">
+        <Icon name="lock" size={15} />
+        <div>
+          <strong>Microphone access blocked</strong>
+          <pre>boothrflow can't see an input device. Grant Microphone in System Settings, then relaunch the app (or the terminal that started it, in dev mode).</pre>
+          <div class="notice-actions">
+            <button
+              class="quiet-button"
+              type="button"
+              onclick={() => void openPermissionPane("microphone")}>Open Microphone settings</button
+            >
+            <button class="quiet-button" type="button" onclick={() => (permissionsDismissed = true)}
+              >Dismiss</button
+            >
+          </div>
+        </div>
+      </section>
+    {/if}
+
+    {#if isMac && inDesktop && permissionsOpen}
+      <section class="panel permissions-panel" aria-labelledby="permissions-heading">
+        <div class="panel-head">
+          <div>
+            <span class="section-kicker">macOS</span>
+            <h2 id="permissions-heading">Permissions</h2>
+          </div>
+          <button class="quiet-button" type="button" onclick={() => (permissionsOpen = false)}
+            >Close</button
+          >
+        </div>
+        <p class="permissions-help">
+          boothrflow needs three permissions on macOS. Click each to open the relevant pane in
+          System Settings, toggle the switch for boothrflow (or for your terminal in dev), then
+          relaunch the app for the change to take effect.
+        </p>
+        <ol class="pipeline-list">
+          <li>
+            <span class="step-icon"><Icon name="mic" size={14} /></span>
+            <div>
+              <strong>Microphone</strong>
+              <small
+                >{micAvailable === false
+                  ? "Currently blocked — capture will fail"
+                  : "Used to capture your voice for dictation"}</small
+              >
+            </div>
+            <button
+              class="quiet-button"
+              type="button"
+              onclick={() => void openPermissionPane("microphone")}>Open</button
+            >
+          </li>
+          <li>
+            <span class="step-icon"><Icon name="zap" size={14} /></span>
+            <div>
+              <strong>Accessibility</strong>
+              <small>Used to paste the transcript into the focused application</small>
+            </div>
+            <button
+              class="quiet-button"
+              type="button"
+              onclick={() => void openPermissionPane("accessibility")}>Open</button
+            >
+          </li>
+          <li>
+            <span class="step-icon"><Icon name="command" size={14} /></span>
+            <div>
+              <strong>Input Monitoring</strong>
+              <small>Required for the global push-to-talk hotkey to fire when unfocused</small>
+            </div>
+            <button
+              class="quiet-button"
+              type="button"
+              onclick={() => void openPermissionPane("input_monitoring")}>Open</button
+            >
+          </li>
+        </ol>
       </section>
     {/if}
 
@@ -258,15 +462,20 @@
         </select>
       </label>
 
-      <div class="model-chip">
+      <div
+        class="model-chip"
+        title={whisperModel === "ggml-tiny.en"
+          ? "Tiny is fast but error-prone. For better quality run: pnpm download:model:mac small  (then set BOOTHRFLOW_WHISPER_MODEL_FILE=ggml-small.en.bin)"
+          : ""}
+      >
         <span>STT</span>
-        <strong>Whisper tiny.en</strong>
+        <strong>Whisper {whisperLabel(whisperModel)}</strong>
         <small>{formatMs(sttMs)}</small>
       </div>
       <div class="model-chip">
         <span>Cleanup</span>
         <strong>{cleanupModel}</strong>
-        <small>{llmMs ? formatMs(llmMs) : settings.style === "raw" ? "off" : "pending"}</small>
+        <small>{llmDisplay()}</small>
       </div>
       <div class="model-chip">
         <span>Memory</span>
@@ -304,7 +513,7 @@
           </div>
           <div>
             <dt>LLM</dt>
-            <dd>{llmMs ? formatMs(llmMs) : "0 ms"}</dd>
+            <dd>{llmDisplay()}</dd>
           </div>
           <div>
             <dt>Peak</dt>
@@ -336,7 +545,7 @@
               <strong>Clean up</strong>
               <small>{styleLabel(settings.style)} via {cleanupModel}</small>
             </div>
-            <code>{llmMs ? formatMs(llmMs) : "0 ms"}</code>
+            <code>{llmDisplay()}</code>
           </li>
           <li>
             <span class="step-icon"><Icon name="history" size={14} /></span>

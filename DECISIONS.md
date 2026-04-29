@@ -317,6 +317,35 @@ The fakes-only inner loop (`pnpm test:rust`, `pnpm test:fe`) still works in any 
 
 ---
 
+## ADR-014 — Whisper default stays at `tiny.en`; `small.en` is the recommended upgrade
+
+**Status:** Accepted, 2026-04-28.
+
+**Context.** Wave 3 UAT raised "is `tiny.en` the right default? quality feels light." The honest answer is "no, but the right answer is per-machine, not a single global default."
+
+| Model            | Disk  | Params | CPU RTF (M-series)      | Notes                                                        |
+| ---------------- | ----- | ------ | ----------------------- | ------------------------------------------------------------ |
+| `tiny.en`        | 75MB  | 39M    | ~0.10                   | Current default. Fast, error-prone on proper nouns.          |
+| `base.en`        | 142MB | 74M    | ~0.18                   | Noticeably better; minor latency cost.                       |
+| `small.en`       | 466MB | 244M   | ~0.50 CPU / ~0.10 Metal | Sweet spot for accuracy. Realtime on Apple Silicon w/ Metal. |
+| `medium.en`      | 1.5GB | 769M   | ~1.5 CPU / ~0.30 Metal  | Approaches SOTA; slow on CPU.                                |
+| `large-v3-turbo` | 1.6GB | ~800M  | ~0.40 Metal             | Best multilingual; assumes GPU.                              |
+
+**Decision.**
+
+- Keep `ggml-tiny.en.bin` as the bundled-default download path. Smallest disk footprint, fastest cold-start, makes "first run" cheap.
+- The UI's STT chip now reads the active model name from the daemon (`whisper_model_name`), so users who upgrade actually see it.
+- Recommend `small.en` for users who care about quality. The tooltip on the chip and a note in the README point at `pnpm download:model:mac small` plus `BOOTHRFLOW_WHISPER_MODEL_FILE=ggml-small.en.bin`.
+- A real "Model picker" UI + Metal-by-default on Apple Silicon is deferred until ADR-009's Parakeet path lands — that work supersedes this one.
+
+**Consequences.**
+
+- Users on `tiny.en` get a discoverable upgrade path without a disk-heavy default.
+- Telemetry / chip honesty: the UI no longer lies "Whisper tiny.en" when the daemon loaded `small.en`.
+- Doesn't fix Whisper's true ceiling; ADR-009 (Parakeet TDT) is still the long-term answer.
+
+---
+
 ## How to add a new ADR
 
 1. Append below the last one with the next number.

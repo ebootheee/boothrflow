@@ -45,7 +45,8 @@
       "minimumSystemVersion": "10.15",
       "hardenedRuntime": true,
       "entitlements": null,
-      "signingIdentity": null
+      "signingIdentity": null,
+      "infoPlist": "Info.plist"
     },
     "linux": {
       "appimage": {

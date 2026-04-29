@@ -3,7 +3,7 @@
 //! v0 only wires `dictate_once`, which currently runs against fakes. The real
 //! pipeline lands when the engine deps are uncommented in Cargo.toml.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::audio::FakeAudioSource;
 use crate::context::FixedContextDetector;
@@ -28,6 +28,99 @@ use std::sync::Arc;
 pub fn set_dictation_style(style: Style) {
     tracing::info!("settings: style → {style:?}");
     settings::set_current_style(style);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// macOS permissions helpers
+//
+// On macOS we need three distinct privileges, each gated by its own TCC
+// pane: Microphone (cpal capture), Accessibility (enigo paste), Input
+// Monitoring (rdev's global keyboard hook). The OS prompts on first use
+// only when the bundled Info.plist carries the matching usage string —
+// in dev mode, the prompt is attributed to the parent process (Terminal,
+// VS Code, etc.) and the user has to relaunch that process after
+// granting. The UI uses these commands to (a) probe whether mic capture
+// works right now, and (b) open the relevant System Settings pane.
+// ────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum MacPermissionPane {
+    Microphone,
+    Accessibility,
+    InputMonitoring,
+}
+
+/// Open the relevant Privacy & Security pane in System Settings. No-op on
+/// non-macOS platforms (returns Ok). The OS handles the rest — once the
+/// user toggles the relevant switch, the next dictation should work.
+#[tauri::command]
+pub fn open_macos_setting(pane: MacPermissionPane) -> Result<(), BoothError> {
+    #[cfg(target_os = "macos")]
+    {
+        let url = match pane {
+            MacPermissionPane::Microphone => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+            }
+            MacPermissionPane::Accessibility => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            }
+            MacPermissionPane::InputMonitoring => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+            }
+        };
+        std::process::Command::new("open")
+            .arg(url)
+            .status()
+            .map_err(|e| BoothError::internal(format!("open settings: {e}")))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = pane;
+        Ok(())
+    }
+}
+
+/// Probe whether the OS is currently letting us read the default input
+/// device. A `false` result means either the mic was denied at the TCC
+/// layer or no input device is connected — both of which prevent
+/// dictation. Cheap; safe to call on app start. Real-engines only since
+/// the cpal probe lives behind that feature.
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+pub fn microphone_available() -> bool {
+    use cpal::traits::HostTrait;
+    let host = cpal::default_host();
+    host.default_input_device().is_some()
+}
+
+#[cfg(not(feature = "real-engines"))]
+#[tauri::command]
+pub fn microphone_available() -> bool {
+    true
+}
+
+/// Report which Whisper model file the daemon will load (or already loaded).
+/// The UI uses this to show "tiny.en" / "base.en" / "small.en" rather than a
+/// hardcoded label, so the chip stays honest after the user swaps models via
+/// `BOOTHRFLOW_WHISPER_MODEL_FILE`. Returns the file stem ("ggml-small.en").
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+pub fn whisper_model_name() -> String {
+    let file = std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE")
+        .unwrap_or_else(|_| crate::stt::DEFAULT_MODEL_FILE.to_string());
+    std::path::Path::new(&file)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("whisper")
+        .to_string()
+}
+
+#[cfg(not(feature = "real-engines"))]
+#[tauri::command]
+pub fn whisper_model_name() -> String {
+    "fake".into()
 }
 
 // ────────────────────────────────────────────────────────────────────────

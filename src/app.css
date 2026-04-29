@@ -215,6 +215,23 @@ kbd {
   white-space: pre-wrap;
 }
 
+.notice-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.permissions-panel {
+  margin-bottom: 10px;
+}
+
+.permissions-help {
+  margin: 0 0 8px;
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .toolbar {
   display: grid;
   grid-template-columns: 190px repeat(3, minmax(0, 1fr));

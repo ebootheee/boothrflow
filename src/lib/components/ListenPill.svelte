@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import Icon, { type IconName } from "$lib/components/Icon.svelte";
   import {
     dictationStore,
@@ -24,12 +24,88 @@
 
   const activeLifecycle = $derived(lifecycle ?? dictationStore.lifecycle);
   const activePartial = $derived(partial ?? dictationStore.lastPartial);
-  const activeAtMs = $derived(atMs ?? dictationStore.atMs);
+  const propAtMs = $derived(atMs);
   const meta = $derived(stageMeta(activeLifecycle));
   const hasPartial = $derived(Boolean(activePartial?.committed || activePartial?.tentative));
 
+  // Live elapsed clock. The backend's `dictation:state` events only fire on
+  // stage transitions, so its at_ms freezes during "listening". We tick a
+  // local clock every 100ms so the user sees the pill counting up while
+  // they hold the talk key.
+  let listenStartedAt = $state<number | null>(null);
+  let nowMs = $state<number>(0);
+  const displayMs = $derived(
+    propAtMs ??
+      (activeLifecycle === "listening" && listenStartedAt != null
+        ? Math.max(0, nowMs - listenStartedAt)
+        : dictationStore.atMs),
+  );
+
+  $effect(() => {
+    if (activeLifecycle === "listening") {
+      // Reset on each fresh press; idempotent if the effect re-runs.
+      if (listenStartedAt == null) {
+        listenStartedAt = Date.now();
+        nowMs = listenStartedAt;
+      }
+      const id = setInterval(() => {
+        nowMs = Date.now();
+      }, 100);
+      return () => clearInterval(id);
+    }
+    listenStartedAt = null;
+  });
+
+  // Auto-scroll the partial row so the newest tokens stay visible as the
+  // user keeps talking. Without this, long utterances clip past the right
+  // edge and the user only sees the first sentence.
+  let partialEl = $state<HTMLDivElement | null>(null);
+  $effect(() => {
+    void activePartial; // track changes
+    if (partialEl) {
+      void tick().then(() => {
+        if (partialEl) partialEl.scrollLeft = partialEl.scrollWidth;
+      });
+    }
+  });
+
   onMount(() => {
     void dictationStore.attach();
+    // Pill window styling (transparent background, no scrollbars, no select)
+    // applied imperatively so it stays scoped to this window. Earlier we
+    // had these as :global(html)/:global(body) rules in the component CSS
+    // block, but Svelte 5 emits :global rules into the shared bundle CSS,
+    // which meant the main window inherited overflow:hidden and lost its
+    // scroll. Setting the styles here on mount keeps them scoped.
+    const html = document.documentElement;
+    const body = document.body;
+    const root = document.getElementById("app");
+    const original: Array<[HTMLElement, Record<string, string>]> = [];
+    for (const el of [html, body, root]) {
+      if (!el) continue;
+      original.push([
+        el,
+        {
+          background: el.style.background,
+          margin: el.style.margin,
+          padding: el.style.padding,
+          overflow: el.style.overflow,
+          userSelect: el.style.userSelect,
+        },
+      ]);
+      el.style.background = "transparent";
+      el.style.margin = "0";
+      el.style.padding = "0";
+      el.style.overflow = "hidden";
+      el.style.userSelect = "none";
+    }
+    return () => {
+      for (const [el, prev] of original) {
+        for (const [k, v] of Object.entries(prev)) {
+          (el.style as unknown as Record<string, string>)[k] = v;
+        }
+      }
+    };
   });
 
   function stageMeta(state: DictationLifecycle): {
@@ -77,11 +153,11 @@
       <Icon name={meta.icon} size={16} strokeWidth={2.3} />
     </span>
     <span class="label">{meta.label}</span>
-    <span class="elapsed">{formatElapsed(activeAtMs)}</span>
+    <span class="elapsed">{formatElapsed(displayMs)}</span>
     <span class="hint">{hotkey}</span>
   </div>
 
-  <div class="partial-row" class:empty={!hasPartial}>
+  <div class="partial-row" class:empty={!hasPartial} bind:this={partialEl}>
     {#if activePartial?.committed}
       <span class="committed">{activePartial.committed}</span>
     {/if}
@@ -95,14 +171,11 @@
 </div>
 
 <style>
-  :global(html),
-  :global(body) {
-    background: transparent !important;
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    user-select: none;
-  }
+  /* No :global() rules here on purpose. Earlier this block had
+     `:global(html), :global(body) { background: transparent; overflow: hidden }`
+     which Svelte 5 emits into the shared bundle CSS — that broke the main
+     window (transparent body / no scroll). Pill-only styles are now applied
+     imperatively in onMount and reverted on unmount. */
 
   .root {
     display: grid;
@@ -188,14 +261,21 @@
   .partial-row {
     display: block;
     min-width: 0;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
     color: rgba(247, 251, 249, 0.92);
     font-size: 12px;
     font-weight: 650;
     letter-spacing: 0;
     line-height: 1.25;
-    text-overflow: ellipsis;
     white-space: nowrap;
+    /* Hide the horizontal scrollbar — the auto-scroll keeps the newest
+       tokens in view as the user keeps speaking. */
+    scrollbar-width: none;
+  }
+
+  .partial-row::-webkit-scrollbar {
+    display: none;
   }
 
   .partial-row.empty {

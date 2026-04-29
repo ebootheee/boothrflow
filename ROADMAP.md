@@ -2,17 +2,20 @@
 
 > Where we are and where we're going. The detailed engineering plan lives in [`PLAN.md`](./PLAN.md); this is the user-facing summary.
 
-## Current state — Phase 1 complete (April 2026)
+## Current state — Wave 3 macOS bring-up + UAT polish (April 2026)
 
-The core push-to-talk dictation loop works end-to-end on Windows.
+The core push-to-talk dictation loop works end-to-end on Windows _and_ macOS.
 
-- Hold `Ctrl + Win`, speak, release → transcript pastes into the focused app
-- Whisper-tiny-en STT (~75MB local model)
-- Tray icon + pause toggle
-- Live transcript panel in the main window
+- Hold `Ctrl + Win` (Windows) or `Ctrl + Cmd` (macOS), speak, release → transcript pastes into the focused app
+- Whisper-tiny-en STT (~75MB local model); Metal feature flag for Apple Silicon
+- Local LLM cleanup via Ollama (qwen2.5:1.5b by default, OpenAI-compat HTTP)
+- Persistent searchable history (SQLite + FTS5 + nomic-embed-text vectors)
+- Quick-paste palette (Alt+Win+H / Option+Cmd+H)
+- Streaming partials in the floating pill (Local-Agreement-2)
+- macOS first-run permissions panel (Microphone / Accessibility / Input Monitoring)
 - 100% local: no audio or transcripts leave your machine
 
-**What's missing:** LLM cleanup (filler removal, punctuation), styles, app-context-aware formatting, history, multilingual STT, polish on edge cases. See below.
+**What's missing:** structured/app-aware formatting (Phase 2), Linux port, code-signing + notarization, onboarding wizard, model picker UI. See below.
 
 ---
 
@@ -23,6 +26,7 @@ Goal: feels like Wispr Flow.
 - **LLM cleanup pass** — Qwen 2.5 3B running locally via `llama-cpp-2`. Strips fillers, fixes punctuation, handles course-correction ("go to the store, I mean the office" → "go to the office").
 - **Style presets** — Formal, Casual, Excited, Very Casual + custom.
 - **App-context detection** — `GetForegroundWindow` + UI Automation to detect Slack vs Gmail vs IDE, applies the right style automatically.
+- **Structured formatting (app-aware)** — beyond punctuation. Wispr Flow's superpower is that long dictations come back as actual _structure_: bullet lists when you spoke a list, paragraph breaks when you paused, a greeting + signature in Mail, code fenced when you said "in code". Plumbing: extend the cleanup prompt with a structure-detection pass keyed on app context (Mail / Slack / Notion / IDE / generic) plus heuristics on the raw transcript ("first… second… third" → numbered list; >25s of speech → paragraph splits at sentence-boundary pause markers). Surfaces as a sixth Style ("Auto-format") that overrides tone-only styles when the model has high confidence; falls back to plain casual cleanup otherwise.
 - **Personal dictionary** — manual add + auto-learn from your post-edits. Hot-word boost via Whisper's `initial_prompt` trick.
 - **Skip-LLM hotkey** — explicit "raw mode" for code dictation.
 
