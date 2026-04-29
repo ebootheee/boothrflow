@@ -47,6 +47,12 @@ no-ops elsewhere.
 Goal: feels like Wispr Flow.
 
 - **LLM cleanup pass** — Qwen 2.5 3B running locally via `llama-cpp-2`. Strips fillers, fixes punctuation, handles course-correction ("go to the store, I mean the office" → "go to the office").
+- **Cleanup quality refinements** _(near-term, prompted by Wave 3 dictation UAT)_ — observed gaps from Eric's hands-free dictation pass:
+  - **Mumbling / rambling removal.** Filler phrases ("you know", "I mean", "uh", "kind of"), false starts, restarts, and tangential half-sentences should be cleaned up by default in non-Raw styles. Today's prompt asks the model to preserve words exactly. Need a graded mode: keep the meaning, drop the disfluency. Plumbing: a per-style `aggressiveness` flag in the system prompt (0 = preserve verbatim, 1 = drop fillers, 2 = light paraphrase). Casual default = 1.
+  - **Bump default to Qwen 2.5 7B.** Wave 3 UAT showed 1.5B is fast (~150-300ms typical) but borderline on quality. 7B costs ~350-400ms which is below the "feels instant" threshold for cleanup (the user has already finished speaking and is watching the paste land). Move `DEFAULT_MODEL` from `qwen2.5:1.5b` to `qwen2.5:7b` once the in-app Settings panel ships so users can drop back to 1.5B if their LLM box is slow. Document as a Reverse-ADR-014 follow-up if we commit.
+  - **Vocabulary expansion.** The Whisper `initial_prompt` doesn't currently list "Qwen" (or "Wispr", "Tauri-Specta", "boothrflow", "MTLDevice"…). Misses on those words ride through to the LLM, which can't always recover. Action: append a curated tech-vocab chunk to `DEFAULT_INITIAL_PROMPT` and let the (future) Personal Dictionary append user-specific terms on top.
+  - **Connect feedback ratings to model selection.** When the rating tool ships (Phase 3), use bad-rated transcripts to flag prompts that consistently underperform; auto-suggest model upgrades when accuracy drops below a threshold.
+- **Streaming partial continuation past the 25 s cap** _(Wave 3 UAT carry-over)_ — the pill stops updating after ~25 s because `MAX_STREAMING_SAMPLES = 16_000 * 25` and Whisper's 30 s context window starts to drop early audio. Final transcript on release is still complete; only the live display freezes. Approach: a commit-and-roll loop in `streaming.rs`. When the buffer crosses ~20 s and LA2 has a long stable prefix, freeze that prefix into a separate `frozen_text: String` field on `Inner`, trim the buffer to the last ~5 s of audio (overlap), and continue ticking. Worker emits `StreamingPartial { committed: frozen + new_committed, tentative, … }`. Bounded per-tick cost, indefinite session length, minimal boundary-word risk. Same final-pass fallback semantics. ~half-day of work.
 - **Style presets** — Formal, Casual, Excited, Very Casual + custom.
 - **App-context detection** — `GetForegroundWindow` + UI Automation to detect Slack vs Gmail vs IDE, applies the right style automatically.
 - **Structured formatting (app-aware)** — beyond punctuation. Wispr Flow's superpower is that long dictations come back as actual _structure_: bullet lists when you spoke a list, paragraph breaks when you paused, a greeting + signature in Mail, code fenced when you said "in code". Plumbing: extend the cleanup prompt with a structure-detection pass keyed on app context (Mail / Slack / Notion / IDE / generic) plus heuristics on the raw transcript ("first… second… third" → numbered list; >25s of speech → paragraph splits at sentence-boundary pause markers). Surfaces as a sixth Style ("Auto-format") that overrides tone-only styles when the model has high confidence; falls back to plain casual cleanup otherwise.
@@ -63,6 +69,20 @@ Goal: beats Wispr Flow on memory.
 - **Quick-paste palette** — `Ctrl+Win+H` opens a fuzzy-search overlay; pick a past dictation and paste it.
 - **Command Mode** — highlight text + hold-to-speak a transformation ("make this more concise", "translate to Spanish").
 - **Voice commands** — "press enter", "new line", "delete that", "select all".
+- **Push connectors (voice + history routing)** — instead of pasting into the focused app, route the transcript to a configured destination. Two surfaces:
+  1. **Voice trigger.** The cleanup pass detects routing instructions inline ("push this to slack", "send to email", "drop into the ops channel") and treats them as a `Connector::SendTo(target, payload)` call rather than a paste. The instruction itself is stripped from the body.
+  2. **History row action.** Each row in the History panel grows a "Push to…" dropdown listing configured connectors. One click queues a background job that sends the formatted transcript and reports success/failure as a toast.
+
+  Connector trait: `fn send(&self, payload: ConnectorPayload) -> Result<()>` — implementations land progressively. v0 set: Slack (incoming webhook), Email (SMTP), generic HTTP webhook (catch-all). v1 set: Notion (append-to-page), Linear (create-issue), Gmail (compose-and-send via OAuth). All connector configuration lives in the in-app Settings panel; secrets stored via `tauri-plugin-store`'s encrypted backend (or OS keychain via `keyring-rs`). Background queue lives in the session daemon — jobs survive app close and retry on next start.
+
+- **Feedback / rating tool** — every history row gets a 1–5 thumb rating + optional free-text feedback. Stored alongside the transcript record. Two near-term uses:
+  - Powers the **Insights dashboard** (Beyond v1) — words/day, accuracy delta, top apps, rating trend over time.
+  - Lights up the **self-learning loop** below.
+- **Self-learning loop** — once we have a corpus of rated transcripts (target: ≥500 entries with ≥1-star span), train a small **LoRA adapter** on top of the cleanup model using the user's own rating signal. Two paths to evaluate:
+  1. **DPO over rated pairs** — when two transcripts share a similar raw input but get different ratings, the high-rated one is the chosen sample. Direct Preference Optimisation needs no reward model and runs on a 4090 / M-series in hours, not days.
+  2. **Prompt-prefix tuning** — cheaper-but-cruder: extract the user's preferred output _patterns_ (favored tone, sentence length, list usage) into a learned prefix appended to the system prompt. No model weights touched.
+
+  v0: ship the rating capture and the corpus export script. The adapter trainer is its own follow-up that can run offline / opt-in. v0 export format: `transcripts.parquet` with `{raw, formatted, style, app_context, rating, comment, ms_total}`. Anyone can pull this into their own training run; we provide a reference Colab.
 
 ## Phase 4 — Production polish (weeks 10–12)
 
@@ -80,10 +100,16 @@ Goal: 1.0.
 
 - **Snippets** — voice-activated text expanders.
 - **Plugin API** — pre-STT, post-STT, pre-paste hooks (WASM-sandboxed).
-- **LoRA fine-tuning** on your own dictation history (opt-in).
+- **LoRA fine-tuning** on your own dictation history (opt-in). See the self-learning loop in Phase 3 for the corpus + DPO sketch.
 - **"Whisper Mode"** — sub-audible speech (custom acoustic model required).
-- **Insights dashboard** — words/day, accuracy delta, top apps.
+- **Insights dashboard** — words/day, accuracy delta, top apps, rating trend.
 - **File tagging in Cursor / Windsurf** — `@file` syntax injection when you mention a filename.
+- **Captain's Log mode** _(easter-egg style)_ — a sixth Style ("Captain's Log") that rewrites dictation as a Star-Trek-style log entry. The cleanup prompt:
+  - Prepends `Captain's log, stardate <X>` where stardate is computed from the current real-world date (TNG-era approximation: `1000 × (year − 2323) + (day_of_year × 1000 / 365.25)`, rendered to one decimal). Today (2026-04-29), that's a negative stardate; for fun we'll absolute-value it or pick a fixed forward-shift offset so it reads like a future entry.
+  - Rewrites the body in formal 24th-century space-faring tone — "Set course for…", "We have detected…", "The crew is investigating…", "End log." — without changing the underlying content. Same `aggressiveness` knob as other styles, so it doesn't hallucinate plot.
+  - Idiom whitelist: cleanup may add closing phrases like "End log." but won't invent ship names, stardate-numeric prefixes, or canon characters. Keeps it bounded.
+
+  Selected from the same Style dropdown as Casual / Formal / Excited; per-app Style overrides apply. Goes in the joke-but-actually-useful column — same energy as the Pirate Mode that lots of code editors ship for talk-like-a-pirate day.
 
 ## What we are deliberately not building
 
