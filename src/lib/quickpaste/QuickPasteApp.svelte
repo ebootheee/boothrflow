@@ -38,6 +38,13 @@
     }
   }
 
+  function onOptionKeydown(e: KeyboardEvent, id: number) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      quickPaste.pasteById(id);
+    }
+  }
+
   function relativeTime(iso: string): string {
     const t = new Date(iso).getTime();
     if (!Number.isFinite(t)) return iso;
@@ -71,7 +78,9 @@
         class:selected={i === quickPaste.selected}
         role="option"
         aria-selected={i === quickPaste.selected}
+        tabindex={i === quickPaste.selected ? 0 : -1}
         onclick={() => quickPaste.pasteById(entry.id)}
+        onkeydown={(e) => onOptionKeydown(e, entry.id)}
       >
         <div class="qp-text">{entry.formatted}</div>
         <div class="qp-meta">

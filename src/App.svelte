@@ -7,104 +7,199 @@
   import { dictationStore } from "$lib/state/dictation.svelte";
   import { settings } from "$lib/state/settings.svelte";
 
-  // Hash-based window routing. The Rust side opens secondary windows with
-  // url=index.html#<label>:
-  //   #listen-pill -> ListenPill (always-on-top dictation indicator)
-  //   #quick-paste -> QuickPasteApp (Alt+Meta+H history palette)
-  // Everything else is the main settings UI.
+  type HistoryEntry = {
+    id: number;
+    captured_at: string;
+    raw: string;
+    formatted: string;
+    style: Style;
+    app_exe: string | null;
+    window_title: string | null;
+    duration_ms: number;
+    llm_ms: number;
+    has_embedding: boolean;
+  };
+
+  type HistoryStats = {
+    total_entries: number;
+    embedded_entries: number;
+    db_path: string;
+    embed_endpoint: string | null;
+    embed_model: string | null;
+  };
+
   const hash = typeof window !== "undefined" ? window.location.hash : "";
   const isPill = hash === "#listen-pill";
   const isQuickPaste = hash === "#quick-paste";
   const inDesktop = isTauri();
 
-  const styleOptions: Array<{
-    value: Style;
-    label: string;
-    tone: string;
-    icon: IconName;
-  }> = [
-    { value: "casual", label: "Casual", tone: "Natural", icon: "pen" },
-    { value: "formal", label: "Formal", tone: "Polished", icon: "book" },
-    { value: "very-casual", label: "Very casual", tone: "Warm", icon: "sparkles" },
-    { value: "excited", label: "Excited", tone: "Bright", icon: "zap" },
-    { value: "raw", label: "Raw", tone: "Untouched", icon: "audio" },
+  const styleOptions: Array<{ value: Style; label: string; icon: IconName }> = [
+    { value: "casual", label: "Casual", icon: "pen" },
+    { value: "formal", label: "Formal", icon: "book" },
+    { value: "very-casual", label: "Very casual", icon: "sparkles" },
+    { value: "excited", label: "Excited", icon: "zap" },
+    { value: "raw", label: "Raw", icon: "audio" },
   ];
 
-  const demoResult = {
-    text: "Okay wow, that was pretty impressive. Let's see if I speak a little faster, if this still lands cleanly. The cleanup pass kept my tone, tightened the sentence breaks, and pasted it without making me babysit the output.",
-    language: "en",
-    duration_ms: 7854,
-  };
-
-  const demoSummary = {
-    frames: 995,
-    samples: 509_440,
-    seconds: 31.84,
-    peak_dbfs: -56.9,
-  };
-
-  const demoHistory = [
+  const demoNow = new Date("2026-04-28T15:42:00-06:00").toISOString();
+  const demoHistory: HistoryEntry[] = [
     {
-      text: "Draft the launch note in a casual voice and keep the technical claims crisp.",
-      language: "en",
-      duration_ms: 642,
+      id: 3,
+      captured_at: demoNow,
+      raw: "okay wow that was pretty impressive let's see if I speak a little faster",
+      formatted:
+        "Okay wow, that was pretty impressive. Let's see if I speak a little faster, if this still lands cleanly. The cleanup pass kept my tone, tightened the sentence breaks, and pasted it without making me babysit the output.",
+      style: "casual",
+      app_exe: "Notepad.exe",
+      window_title: "Notes",
+      duration_ms: 7854,
+      llm_ms: 509,
+      has_embedding: true,
     },
     {
-      text: "Add Connor, Sophie, and Max to the dictionary so their names stop getting corrected.",
-      language: "en",
+      id: 2,
+      captured_at: new Date("2026-04-28T13:08:00-06:00").toISOString(),
+      raw: "add connor sophie and max to the dictionary",
+      formatted:
+        "Add Connor, Sophie, and Max to the dictionary so their names stop getting corrected.",
+      style: "formal",
+      app_exe: "Code.exe",
+      window_title: "boothrflow",
       duration_ms: 811,
+      llm_ms: 164,
+      has_embedding: true,
     },
     {
-      text: "Make this paragraph tighter, then paste it into the active document.",
-      language: "en",
+      id: 1,
+      captured_at: new Date("2026-04-27T17:22:00-06:00").toISOString(),
+      raw: "make this paragraph tighter then paste it into the active document",
+      formatted: "Make this paragraph tighter, then paste it into the active document.",
+      style: "casual",
+      app_exe: null,
+      window_title: null,
       duration_ms: 704,
+      llm_ms: 0,
+      has_embedding: false,
     },
   ];
 
-  const displayResult = $derived(dictationStore.lastResult ?? (inDesktop ? null : demoResult));
-  const displaySummary = $derived(dictationStore.lastSummary ?? (inDesktop ? null : demoSummary));
-  const displayHistory = $derived(
-    dictationStore.history.length > 1
-      ? dictationStore.history.slice(1)
-      : inDesktop
-        ? []
-        : demoHistory,
-  );
+  const demoStats: HistoryStats = {
+    total_entries: demoHistory.length,
+    embedded_entries: 2,
+    db_path: "%APPDATA%/boothrflow/history.db",
+    embed_endpoint: "http://localhost:11434/v1/embeddings",
+    embed_model: "nomic-embed-text",
+  };
 
+  let historyEntries = $state<HistoryEntry[]>([]);
+  let historyStats = $state<HistoryStats | null>(null);
+  let historyLoading = $state(false);
+  let historyError = $state<string | null>(null);
+  let selectedHistoryId = $state<number | null>(null);
+
+  const displayHistory = $derived(
+    historyEntries.length ? historyEntries : inDesktop ? [] : demoHistory,
+  );
+  const selectedEntry = $derived(
+    displayHistory.find((entry) => entry.id === selectedHistoryId) ?? displayHistory[0] ?? null,
+  );
+  const displayStats = $derived(historyStats ?? (inDesktop ? null : demoStats));
+  const liveText = $derived(dictationStore.lastResult?.text ?? selectedEntry?.formatted ?? "");
+  const sttMs = $derived(selectedEntry?.duration_ms ?? dictationStore.lastResult?.duration_ms ?? 0);
+  const llmMs = $derived(selectedEntry?.llm_ms ?? 0);
+  const totalMs = $derived(sttMs + llmMs);
+  const captureSeconds = $derived(
+    dictationStore.lastSummary?.seconds ?? (selectedEntry ? selectedEntry.duration_ms / 1000 : 0),
+  );
+  const peakLevel = $derived(
+    dictationStore.lastSummary ? `${dictationStore.lastSummary.peak_dbfs.toFixed(1)} dBFS` : "n/a",
+  );
   const statusLabel = $derived(
     dictationStore.status === "listening"
       ? "Listening"
       : dictationStore.status === "processing"
-        ? "Cleaning"
+        ? "Processing"
         : "Ready",
   );
 
-  const statusDetail = $derived(
-    dictationStore.status === "listening"
-      ? "Voice capture active"
-      : dictationStore.status === "processing"
-        ? "Formatting locally"
-        : "Hold shortcut in any app",
+  const cleanupModel = $derived(
+    settings.style === "raw" ? "Bypass" : "Qwen 2.5 / OpenAI-compatible",
   );
+  const embeddingModel = $derived(displayStats?.embed_model ?? "Off");
 
-  const whisperDuration = $derived(
-    displayResult ? `${(displayResult.duration_ms / 1000).toFixed(2)}s` : "Idle",
-  );
+  async function loadHistory() {
+    if (!inDesktop) {
+      historyEntries = demoHistory;
+      historyStats = demoStats;
+      selectedHistoryId = demoHistory[0]?.id ?? null;
+      return;
+    }
 
-  const capturedDuration = $derived(
-    displaySummary ? `${displaySummary.seconds.toFixed(1)}s` : "Awaiting audio",
-  );
-
-  const peakLevel = $derived(
-    displaySummary ? `${displaySummary.peak_dbfs.toFixed(1)} dBFS` : "No signal",
-  );
+    historyLoading = true;
+    historyError = null;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const [recent, stats] = await Promise.all([
+        invoke<HistoryEntry[]>("history_recent", { limit: 100 }),
+        invoke<HistoryStats>("history_stats"),
+      ]);
+      historyEntries = recent;
+      historyStats = stats;
+      if (!selectedHistoryId && recent[0]) selectedHistoryId = recent[0].id;
+      if (selectedHistoryId && !recent.some((entry) => entry.id === selectedHistoryId)) {
+        selectedHistoryId = recent[0]?.id ?? null;
+      }
+    } catch (error) {
+      historyError = String(error);
+    } finally {
+      historyLoading = false;
+    }
+  }
 
   function selectStyle(style: Style) {
     settings.style = style;
   }
 
+  function styleLabel(style: Style): string {
+    return styleOptions.find((option) => option.value === style)?.label ?? style;
+  }
+
+  function formatDate(iso: string): string {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  function formatMs(ms: number | null | undefined): string {
+    if (!ms) return "0 ms";
+    return ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${Math.round(ms)} ms`;
+  }
+
+  function formatSeconds(seconds: number): string {
+    return seconds ? `${seconds.toFixed(1)} s` : "n/a";
+  }
+
+  function appLabel(entry: HistoryEntry): string {
+    return entry.window_title || entry.app_exe || "Unknown app";
+  }
+
+  function preview(text: string): string {
+    return text.length > 130 ? `${text.slice(0, 127)}...` : text;
+  }
+
+  function embeddingRatio(stats: HistoryStats | null): string {
+    if (!stats) return "n/a";
+    return `${stats.embedded_entries}/${stats.total_entries}`;
+  }
+
   onMount(() => {
     void dictationStore.attach();
+    void loadHistory();
   });
 </script>
 
@@ -117,219 +212,236 @@
   {/await}
 {:else}
   <main class="app-shell">
-    <section class="topbar" aria-label="Application status">
+    <header class="app-topbar">
       <div class="brand-lockup">
-        <div class="brand-mark" aria-hidden="true">
-          <Icon name="mic" size={20} strokeWidth={2.4} />
-        </div>
+        <span class="brand-mark" aria-hidden="true"
+          ><Icon name="mic" size={16} strokeWidth={2.3} /></span
+        >
         <div>
           <h1>boothrflow</h1>
-          <p>Local-first voice dictation</p>
+          <p>Local-first dictation</p>
         </div>
       </div>
 
-      <div class="status-cluster" data-status={dictationStore.status}>
-        <span class="status-dot" aria-hidden="true"></span>
-        <div>
-          <strong>{statusLabel}</strong>
-          <span>{statusDetail}</span>
-        </div>
+      <div class="top-actions">
+        <span class="status-pill" data-status={dictationStore.status}>
+          <span class="status-dot" aria-hidden="true"></span>
+          {statusLabel}
+        </span>
+        <kbd><Icon name="command" size={13} /> Ctrl + Win</kbd>
+        <kbd><Icon name="history" size={13} /> Alt + Win + H</kbd>
       </div>
-    </section>
+    </header>
 
     {#if dictationStore.modelMissing}
-      <section class="model-alert" aria-live="polite">
-        <Icon name="lock" size={18} />
+      <section class="notice" aria-live="polite">
+        <Icon name="lock" size={15} />
         <div>
-          <h2>Whisper model not loaded</h2>
+          <strong>Whisper model missing</strong>
           <pre>{dictationStore.modelMissing}</pre>
         </div>
       </section>
     {/if}
 
-    <section class="hero-panel" aria-label="Dictation workspace">
-      <div class="hero-copy">
-        <span class="eyebrow">Desktop dictation</span>
-        <h2>Speak anywhere. Paste cleanly.</h2>
-        <p>
-          Fast local capture, lightweight cleanup, and a focused review surface for every dictation.
-        </p>
+    <section class="toolbar" aria-label="Dictation controls and model status">
+      <label class="field compact-field">
+        <span>Style</span>
+        <select
+          value={settings.style}
+          onchange={(event) => selectStyle(event.currentTarget.value as Style)}
+        >
+          {#each styleOptions as option (option.value)}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
 
-        <div class="shortcut-card" aria-label="Current dictation shortcut">
-          <span>Shortcut</span>
-          <kbd><Icon name="command" size={15} /> Ctrl + Win</kbd>
-        </div>
+      <div class="model-chip">
+        <span>STT</span>
+        <strong>Whisper tiny.en</strong>
+        <small>{formatMs(sttMs)}</small>
       </div>
-
-      <div class="capture-panel" data-status={dictationStore.status}>
-        <div class="orb-wrap" aria-hidden="true">
-          <div class="capture-orb">
-            <Icon name="mic" size={38} strokeWidth={2.2} />
-          </div>
-          <span class="ring ring-one"></span>
-          <span class="ring ring-two"></span>
-        </div>
-        <div class="capture-copy">
-          <strong>{statusLabel}</strong>
-          <span>{settings.style.replace("-", " ")} style</span>
-        </div>
-        <div class="waveform" aria-hidden="true">
-          <span></span>
-          <span></span>
-          <span></span>
-          <span></span>
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
+      <div class="model-chip">
+        <span>Cleanup</span>
+        <strong>{cleanupModel}</strong>
+        <small>{llmMs ? formatMs(llmMs) : settings.style === "raw" ? "off" : "pending"}</small>
+      </div>
+      <div class="model-chip">
+        <span>Memory</span>
+        <strong>{embeddingModel}</strong>
+        <small>{embeddingRatio(displayStats)} embedded</small>
       </div>
     </section>
 
-    <section class="content-grid">
-      <div class="primary-column">
-        <section class="surface style-surface" aria-labelledby="style-heading">
-          <div class="section-heading">
-            <div>
-              <span class="eyebrow">Tone</span>
-              <h2 id="style-heading">Style preset</h2>
-            </div>
-            <span class="local-badge"><Icon name="lock" size={14} /> Local</span>
+    <section class="workspace-grid">
+      <section class="panel live-panel" aria-labelledby="live-heading">
+        <div class="panel-head">
+          <div>
+            <span class="section-kicker">Current</span>
+            <h2 id="live-heading">Transcript</h2>
           </div>
+          <span class="subtle-text">Total {formatMs(totalMs)}</span>
+        </div>
 
-          <div class="style-grid" role="radiogroup" aria-label="Dictation style preset">
-            {#each styleOptions as option (option.value)}
+        {#if dictationStore.lastError}
+          <pre class="error-block">{dictationStore.lastError}</pre>
+        {:else if liveText}
+          <div class="transcript-box">{liveText}</div>
+        {:else}
+          <div class="empty-panel">Hold Ctrl + Win to dictate.</div>
+        {/if}
+
+        <dl class="telemetry-row">
+          <div>
+            <dt>Captured</dt>
+            <dd>{formatSeconds(captureSeconds)}</dd>
+          </div>
+          <div>
+            <dt>STT</dt>
+            <dd>{formatMs(sttMs)}</dd>
+          </div>
+          <div>
+            <dt>LLM</dt>
+            <dd>{llmMs ? formatMs(llmMs) : "0 ms"}</dd>
+          </div>
+          <div>
+            <dt>Peak</dt>
+            <dd>{peakLevel}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <aside class="panel process-panel" aria-labelledby="process-heading">
+        <div class="panel-head">
+          <div>
+            <span class="section-kicker">Process</span>
+            <h2 id="process-heading">Pipeline</h2>
+          </div>
+        </div>
+
+        <ol class="pipeline-list">
+          <li>
+            <span class="step-icon"><Icon name="mic" size={14} /></span>
+            <div>
+              <strong>Capture</strong>
+              <small>{formatSeconds(captureSeconds)} audio</small>
+            </div>
+            <code>{peakLevel}</code>
+          </li>
+          <li>
+            <span class="step-icon"><Icon name="brain" size={14} /></span>
+            <div>
+              <strong>Clean up</strong>
+              <small>{styleLabel(settings.style)} via {cleanupModel}</small>
+            </div>
+            <code>{llmMs ? formatMs(llmMs) : "0 ms"}</code>
+          </li>
+          <li>
+            <span class="step-icon"><Icon name="history" size={14} /></span>
+            <div>
+              <strong>Index</strong>
+              <small>{embeddingModel}</small>
+            </div>
+            <code>{embeddingRatio(displayStats)}</code>
+          </li>
+          <li>
+            <span class="step-icon"><Icon name="zap" size={14} /></span>
+            <div>
+              <strong>Paste</strong>
+              <small>{selectedEntry ? appLabel(selectedEntry) : "Focused app"}</small>
+            </div>
+            <code>local</code>
+          </li>
+        </ol>
+      </aside>
+    </section>
+
+    <section class="history-grid">
+      <section class="panel history-panel" aria-labelledby="history-heading">
+        <div class="panel-head history-head">
+          <div>
+            <span class="section-kicker">History</span>
+            <h2 id="history-heading">Recent transcripts</h2>
+          </div>
+          <button class="quiet-button" type="button" onclick={() => void loadHistory()}>
+            {historyLoading ? "Loading" : "Refresh"}
+          </button>
+        </div>
+
+        {#if historyError}
+          <div class="inline-error">{historyError}</div>
+        {/if}
+
+        {#if displayHistory.length}
+          <div class="history-table" role="list" aria-label="Recent transcript history">
+            <div class="history-row table-head" aria-hidden="true">
+              <span>Date</span>
+              <span>Latency</span>
+              <span>Style</span>
+              <span>Transcript</span>
+            </div>
+            {#each displayHistory as entry (entry.id)}
               <button
-                class:active={settings.style === option.value}
+                class="history-row"
+                class:selected={selectedEntry?.id === entry.id}
                 type="button"
-                role="radio"
-                aria-checked={settings.style === option.value}
-                onclick={() => selectStyle(option.value)}
+                onclick={() => (selectedHistoryId = entry.id)}
               >
-                <Icon name={option.icon} size={17} strokeWidth={2.2} />
-                <span>
-                  <strong>{option.label}</strong>
-                  <small>{option.tone}</small>
-                </span>
-                {#if settings.style === option.value}
-                  <Icon class="style-check" name="check" size={16} strokeWidth={2.4} />
-                {/if}
+                <span>{formatDate(entry.captured_at)}</span>
+                <span>{formatMs(entry.duration_ms + entry.llm_ms)}</span>
+                <span>{styleLabel(entry.style)}</span>
+                <span>{preview(entry.formatted)}</span>
               </button>
             {/each}
           </div>
-        </section>
-
-        <section class="surface transcript-surface" aria-labelledby="transcript-heading">
-          <div class="section-heading">
-            <div>
-              <span class="eyebrow">Output</span>
-              <h2 id="transcript-heading">Live transcript</h2>
-            </div>
-            <span class="status-chip" data-status={dictationStore.status}>
-              <Icon name="radio" size={14} />
-              {dictationStore.status}
-            </span>
+        {:else}
+          <div class="empty-panel">
+            {historyLoading ? "Loading history..." : "No saved transcripts yet."}
           </div>
+        {/if}
+      </section>
 
-          {#if dictationStore.lastError}
-            <pre class="error-block">{dictationStore.lastError}</pre>
-          {:else if displayResult}
-            <article class="transcript-card">
-              <p>{displayResult.text || "<empty transcript>"}</p>
-            </article>
-            <dl class="metric-strip">
-              <div>
-                <dt><Icon name="clock" size={14} /> Whisper</dt>
-                <dd>{whisperDuration}</dd>
-              </div>
-              <div>
-                <dt><Icon name="audio" size={14} /> Captured</dt>
-                <dd>{capturedDuration}</dd>
-              </div>
-              <div>
-                <dt><Icon name="radio" size={14} /> Peak</dt>
-                <dd>{peakLevel}</dd>
-              </div>
-            </dl>
-          {:else}
-            <div class="empty-state">
-              <Icon name="mic" size={26} />
-              <p>No transcript yet</p>
-            </div>
+      <section class="panel detail-panel" aria-labelledby="detail-heading">
+        <div class="panel-head">
+          <div>
+            <span class="section-kicker">Open</span>
+            <h2 id="detail-heading">Transcript detail</h2>
+          </div>
+          {#if selectedEntry}
+            <span class="subtle-text">{formatDate(selectedEntry.captured_at)}</span>
           {/if}
-        </section>
-      </div>
+        </div>
 
-      <aside class="side-column" aria-label="Voice workflow">
-        <section class="surface pipeline-surface">
-          <span class="eyebrow">Flow</span>
-          <h2>Pipeline</h2>
-          <ol class="pipeline-list">
-            <li>
-              <span><Icon name="mic" size={15} /></span>
-              <div>
-                <strong>Capture</strong>
-                <small>{capturedDuration}</small>
-              </div>
-            </li>
-            <li>
-              <span><Icon name="brain" size={15} /></span>
-              <div>
-                <strong>Clean up</strong>
-                <small>{settings.style.replace("-", " ")}</small>
-              </div>
-            </li>
-            <li>
-              <span><Icon name="zap" size={15} /></span>
-              <div>
-                <strong>Paste</strong>
-                <small>Focused app</small>
-              </div>
-            </li>
-          </ol>
-        </section>
-
-        <section class="surface feature-surface">
-          <span class="eyebrow">Next layer</span>
-          <h2>Workspace memory</h2>
-          <div class="feature-list">
+        {#if selectedEntry}
+          <dl class="detail-meta">
             <div>
-              <Icon name="book" size={16} />
-              <span>Dictionary</span>
+              <dt>App</dt>
+              <dd>{appLabel(selectedEntry)}</dd>
             </div>
             <div>
-              <Icon name="sparkles" size={16} />
-              <span>Snippets</span>
+              <dt>Total</dt>
+              <dd>{formatMs(selectedEntry.duration_ms + selectedEntry.llm_ms)}</dd>
             </div>
             <div>
-              <Icon name="languages" size={16} />
-              <span>Languages</span>
+              <dt>STT</dt>
+              <dd>{formatMs(selectedEntry.duration_ms)}</dd>
             </div>
-          </div>
-        </section>
-
-        <section class="surface history-surface" aria-labelledby="history-heading">
-          <div class="section-heading compact">
             <div>
-              <span class="eyebrow">Recent</span>
-              <h2 id="history-heading">History</h2>
+              <dt>LLM</dt>
+              <dd>{formatMs(selectedEntry.llm_ms)}</dd>
             </div>
-            <Icon name="history" size={17} />
-          </div>
+          </dl>
 
-          {#if displayHistory.length}
-            <ul>
-              {#each displayHistory as entry, i (i)}
-                <li>
-                  <p>{entry.text || "<empty>"}</p>
-                  <span>{entry.duration_ms}ms</span>
-                </li>
-              {/each}
-            </ul>
-          {:else}
-            <p class="muted-line">Recent dictations appear here.</p>
-          {/if}
-        </section>
-      </aside>
+          <article class="detail-transcript">{selectedEntry.formatted}</article>
+
+          <details class="raw-details">
+            <summary>Raw transcript</summary>
+            <p>{selectedEntry.raw}</p>
+          </details>
+        {:else}
+          <div class="empty-panel">Select a history row to open a transcript.</div>
+        {/if}
+      </section>
     </section>
   </main>
 {/if}
