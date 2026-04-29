@@ -57,6 +57,29 @@ real-engines = [
 ]
 win32-headed = []
 
+# ──────────────────────────────────────────────────────────────────────────
+# GPU backends for Whisper. Pick one per build; CPU-only is the safe default.
+# These forward to the matching whisper-rs / whisper.cpp backend feature.
+#
+#   gpu-vulkan – Windows/Linux portable GPU (NVIDIA/AMD/Intel). Requires the
+#                Vulkan SDK at build time (VULKAN_SDK env var) and a Vulkan
+#                loader at runtime (ships with every modern GPU driver).
+#   gpu-cuda   – Windows/Linux NVIDIA-only. Requires CUDA toolkit at build.
+#                Fastest path on NVIDIA cards but ties the binary to CUDA libs.
+#   gpu-metal  – macOS only (lands in Wave 3). No SDK install needed; built
+#                into the system. Auto-uses ANE on Apple Silicon when available.
+#
+# Build example (Windows + Vulkan):
+#   scripts\cargo-msvc.bat cargo build --release \
+#     --features "real-engines gpu-vulkan"
+#
+# These are NOT in `default` because they require an SDK; the default build
+# stays self-contained and runs CPU-only Whisper.
+# ──────────────────────────────────────────────────────────────────────────
+gpu-vulkan = ["whisper-rs?/vulkan"]
+gpu-cuda = ["whisper-rs?/cuda"]
+gpu-metal = ["whisper-rs?/metal"]
+
 [profile.dev]
 incremental = true
 

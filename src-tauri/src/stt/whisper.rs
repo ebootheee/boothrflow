@@ -48,6 +48,18 @@ pub struct WhisperSttEngine {
 }
 
 impl WhisperSttEngine {
+    /// Cheap-clone access to the shared context. Streaming uses this to
+    /// spin up its own [`WhisperState`] without re-loading the model file.
+    pub fn shared_context(&self) -> Arc<WhisperContext> {
+        Arc::clone(&self.context)
+    }
+
+    pub fn initial_prompt(&self) -> Option<&str> {
+        self.initial_prompt.as_deref()
+    }
+}
+
+impl WhisperSttEngine {
     /// Load a Whisper model from the given path.
     pub fn from_path(model_path: &Path, name: impl Into<String>) -> Result<Self> {
         if !model_path.exists() {

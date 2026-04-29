@@ -34,3 +34,8 @@ pub use whisper::{
     default_model_path, default_models_dir, SerializedWhisperSttEngine, WhisperSttEngine,
     DEFAULT_MODEL_FILE, DEFAULT_MODEL_URL,
 };
+
+#[cfg(feature = "real-engines")]
+pub mod streaming;
+#[cfg(feature = "real-engines")]
+pub use streaming::{StreamingPartial, StreamingTranscriber};
