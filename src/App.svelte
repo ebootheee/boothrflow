@@ -204,7 +204,7 @@
 </script>
 
 {#if isPill}
-  <ListenPill listening={true} label="Listening" />
+  <ListenPill />
 {:else if isQuickPaste}
   {#await import("$lib/quickpaste/QuickPasteApp.svelte") then m}
     {@const QuickPasteApp = m.default}

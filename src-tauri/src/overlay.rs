@@ -13,8 +13,8 @@ use crate::error::{BoothError, Result};
 
 pub const LISTEN_PILL_LABEL: &str = "listen-pill";
 
-const PILL_WIDTH: f64 = 280.0;
-const PILL_HEIGHT: f64 = 60.0;
+const PILL_WIDTH: f64 = 520.0;
+const PILL_HEIGHT: f64 = 74.0;
 
 /// Build the pill window at app startup. Hidden until [`show`] is called.
 pub fn create_pill_window(app: &AppHandle) -> Result<()> {
