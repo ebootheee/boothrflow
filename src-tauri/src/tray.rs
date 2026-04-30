@@ -104,8 +104,11 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
         // The generated macOS icon is an alpha-mask template image designed
         // for NSStatusItem. Template mode lets AppKit adapt it for dark/light
         // menu bars; using the full-color app/window icon here made the status
-        // item effectively invisible on at least one Apple Silicon Mac.
-        builder = builder.icon_as_template(true);
+        // item effectively invisible on at least one Apple Silicon Mac. Keep
+        // a text title while we are in menu-bar-only mode so the restore
+        // surface is unmistakable even if the icon lands near the notch or
+        // among a crowded set of status items.
+        builder = builder.icon_as_template(true).title("boothrflow");
     }
 
     builder
