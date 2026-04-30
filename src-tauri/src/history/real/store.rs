@@ -446,6 +446,7 @@ fn style_str(s: &Style) -> &'static str {
         Style::Casual => "casual",
         Style::Excited => "excited",
         Style::VeryCasual => "very-casual",
+        Style::CaptainsLog => "captains-log",
     }
 }
 
@@ -455,6 +456,7 @@ fn parse_style(s: &str) -> Style {
         "formal" => Style::Formal,
         "excited" => Style::Excited,
         "very-casual" => Style::VeryCasual,
+        "captains-log" => Style::CaptainsLog,
         _ => Style::Casual,
     }
 }

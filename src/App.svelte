@@ -47,6 +47,10 @@
     { value: "very-casual", label: "Very casual", icon: "sparkles" },
     { value: "excited", label: "Excited", icon: "zap" },
     { value: "raw", label: "Raw", icon: "audio" },
+    // Captain's Log: Star-Trek-style log entry (computed stardate prefix +
+    // formal 24th-century rewrite). Same code path as the other styles —
+    // just a different prompt branch in the cleanup backend.
+    { value: "captains-log", label: "Captain's Log", icon: "radio" },
   ];
 
   const demoNow = new Date("2026-04-28T15:42:00-06:00").toISOString();
@@ -189,8 +193,13 @@
   );
   function llmDisplay(): string {
     switch (llmStatus) {
-      case "ran":
-        return formatMs(llmMs);
+      case "ran": {
+        const tps = dictationStore.lastDone?.llm_tok_per_sec;
+        const base = formatMs(llmMs);
+        // Show tok/s alongside ms when the backend reported it. Distinct
+        // from `null` (Ollama silent) — null is rendered as just the ms.
+        return tps != null && tps > 0 ? `${base} · ${tps.toFixed(0)} tok/s` : base;
+      }
       case "skipped-raw":
         return "off (raw)";
       case "skipped-short":

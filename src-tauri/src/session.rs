@@ -70,7 +70,7 @@ mod real {
 
     /// Final telemetry payload on `dictation:done` — emitted after paste
     /// completes (or on hard failure with whatever timings we have).
-    #[derive(Debug, Clone, Serialize)]
+    #[derive(Debug, Clone, Serialize, Default)]
     struct DictationDone {
         formatted: String,
         capture_ms: u64,
@@ -78,6 +78,13 @@ mod real {
         llm_ms: u64,
         paste_ms: u64,
         total_ms: u64,
+        // Cleanup-pass throughput, populated when the LLM backend reports
+        // a `usage` block (Ollama always does; some compat servers don't).
+        // `None` when the LLM was skipped or didn't report — the FE
+        // distinguishes "no data" from "0".
+        llm_prompt_tokens: Option<u32>,
+        llm_completion_tokens: Option<u32>,
+        llm_tok_per_sec: Option<f32>,
     }
 
     fn emit_stage(app: &AppHandle, state: &'static str, started: Instant) {
@@ -373,12 +380,10 @@ mod real {
             let _ = app.emit(
                 "dictation:done",
                 &DictationDone {
-                    formatted: String::new(),
                     capture_ms,
                     stt_ms,
-                    llm_ms: 0,
-                    paste_ms: 0,
                     total_ms,
+                    ..DictationDone::default()
                 },
             );
             return;
@@ -388,12 +393,14 @@ mod real {
         // back to raw transcript on any LLM failure.
         emit_stage(app, "cleaning", dictation_started);
         let style = settings::current_style();
-        let (formatted, llm_ms, llm_err) = run_llm_cleanup(&stt_result.text, style, llm);
-        if let Some(err) = llm_err {
+        let cleanup = run_llm_cleanup(&stt_result.text, style, llm);
+        if let Some(err) = cleanup.error {
             // Surface so the UI can show "Cleanup unavailable — using raw"
             // instead of silently displaying 0 ms.
             let _ = app.emit("dictation:llm-missing", err);
         }
+        let formatted = cleanup.text;
+        let llm_ms = cleanup.elapsed_ms;
 
         if formatted != stt_result.text {
             let _ = app.emit(
@@ -448,44 +455,86 @@ mod real {
                 llm_ms,
                 paste_ms,
                 total_ms,
+                llm_prompt_tokens: cleanup.prompt_tokens,
+                llm_completion_tokens: cleanup.completion_tokens,
+                llm_tok_per_sec: cleanup.tok_per_sec,
             },
         );
     }
 
-    /// Returns `(formatted, elapsed_ms, error)`. `error` is `Some` only when
-    /// the cleanup pass tried to run and the call failed — so the UI can
-    /// distinguish "0 ms because LLM was skipped" (short utterance / raw
+    /// Bundle of cleanup outcome + telemetry the session daemon needs to
+    /// build the `dictation:done` event. `error` is `Some` only when the
+    /// cleanup pass tried to run and the call failed — so the UI can
+    /// distinguish "0 ms because LLM was skipped" (short utterance / Raw
     /// style / disabled) from "0 ms because Ollama is down".
+    struct CleanupOutcome {
+        text: String,
+        elapsed_ms: u64,
+        prompt_tokens: Option<u32>,
+        completion_tokens: Option<u32>,
+        tok_per_sec: Option<f32>,
+        error: Option<String>,
+    }
+
+    impl CleanupOutcome {
+        fn passthrough(raw: &str) -> Self {
+            Self {
+                text: raw.to_string(),
+                elapsed_ms: 0,
+                prompt_tokens: None,
+                completion_tokens: None,
+                tok_per_sec: None,
+                error: None,
+            }
+        }
+    }
+
     fn run_llm_cleanup(
         raw: &str,
         style: settings::Style,
         llm: Option<&OpenAiCompatLlmCleanup>,
-    ) -> (String, u64, Option<String>) {
+    ) -> CleanupOutcome {
         // Hard skips: explicit raw style, no LLM loaded, very short utterance.
         if matches!(style, settings::Style::Raw) {
-            return (raw.to_string(), 0, None);
+            return CleanupOutcome::passthrough(raw);
         }
         let Some(llm) = llm else {
-            return (raw.to_string(), 0, None);
+            return CleanupOutcome::passthrough(raw);
         };
         if should_skip_llm(raw, true) {
-            return (raw.to_string(), 0, None);
+            return CleanupOutcome::passthrough(raw);
         }
 
-        let started = std::time::Instant::now();
         match llm.cleanup(CleanupRequest {
             raw_text: raw,
             style,
             app_context: None,
         }) {
-            Ok(text) => {
-                let ms = started.elapsed().as_millis() as u64;
-                tracing::info!("llm cleanup ({ms} ms): \"{raw}\" → \"{text}\"");
-                (text, ms, None)
+            Ok(out) => {
+                let tok_per_sec = out.tokens_per_second();
+                tracing::info!(
+                    "llm cleanup ({} ms{}): \"{raw}\" → \"{}\"",
+                    out.elapsed_ms,
+                    tok_per_sec
+                        .map(|t| format!(", {t:.1} tok/s"))
+                        .unwrap_or_default(),
+                    out.text,
+                );
+                CleanupOutcome {
+                    text: out.text,
+                    elapsed_ms: out.elapsed_ms,
+                    prompt_tokens: out.prompt_tokens,
+                    completion_tokens: out.completion_tokens,
+                    tok_per_sec,
+                    error: None,
+                }
             }
             Err(e) => {
                 tracing::error!("llm cleanup failed, falling back to raw: {e}");
-                (raw.to_string(), 0, Some(e.to_string()))
+                CleanupOutcome {
+                    error: Some(e.to_string()),
+                    ..CleanupOutcome::passthrough(raw)
+                }
             }
         }
     }

@@ -46,11 +46,13 @@ impl Pipeline<'_> {
         let formatted = if skipped_llm {
             stt.text.clone()
         } else {
-            self.llm.cleanup(CleanupRequest {
-                raw_text: &stt.text,
-                style,
-                app_context: app_exe.as_deref(),
-            })?
+            self.llm
+                .cleanup(CleanupRequest {
+                    raw_text: &stt.text,
+                    style,
+                    app_context: app_exe.as_deref(),
+                })?
+                .text
         };
 
         self.injector.inject(&formatted)?;

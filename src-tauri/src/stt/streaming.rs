@@ -11,9 +11,14 @@
 //! - We re-run Whisper on the *entire* buffer each tick (not a sliding
 //!   window), which costs O(N) per tick for an N-second utterance. With
 //!   tiny.en on CPU this is ~150–250ms for ≤10s — fits in our 800ms tick.
-//! - Whisper uses 30s context internally; longer utterances would need a
-//!   sliding-window strategy. Defer to a follow-up if dictations regularly
-//!   exceed ~25s.
+//! - Whisper uses 30s context internally; we keep the live buffer below
+//!   that with a "commit-and-roll" loop. When the buffer crosses
+//!   [`ROLL_THRESHOLD_SAMPLES`], the LA2-stable prefix is moved to a
+//!   separate `frozen_text` field and the audio is trimmed to a small
+//!   overlap (`ROLL_KEEP_SAMPLES`). The worker prepends `frozen_text` to
+//!   every emitted partial, with a suffix-prefix dedup against the
+//!   overlap. Net effect: indefinitely-long dictations stay responsive
+//!   and accurate without exceeding Whisper's context window.
 //!
 //! The press loop in `session.rs` owns the [`StreamingTranscriber`]; it
 //! pushes frames synchronously and ticks `maybe_flush` on its own cadence.
@@ -38,10 +43,20 @@ pub const PARTIAL_INTERVAL: Duration = Duration::from_millis(800);
 /// is unstable on sub-1s clips.
 const MIN_PARTIAL_SAMPLES: usize = 16_000; // 1.0s at 16kHz
 
-/// Cap streaming audio length. Beyond this we stop emitting partials —
-/// quality degrades past Whisper's 30s context window. The final pass on
-/// release still uses the full buffer.
-const MAX_STREAMING_SAMPLES: usize = 16_000 * 25; // 25s at 16kHz
+/// When the streaming buffer crosses this length, perform a "commit-and-roll":
+/// freeze the most recent stable LA2 prefix into `frozen_text`, trim the live
+/// audio buffer to `ROLL_KEEP_SAMPLES` of overlap, and continue ticking. This
+/// keeps per-tick Whisper compute bounded while supporting indefinitely long
+/// dictations.
+const ROLL_THRESHOLD_SAMPLES: usize = 16_000 * 20; // 20s at 16kHz
+
+/// How much audio to retain after a roll, as overlap context for the next
+/// transcription window. ~3s gives Whisper enough surrounding context to
+/// produce coherent output at the boundary; less risks a stutter, more
+/// inflates the post-roll prompt-eval cost. The matching tail of
+/// `frozen_text` is then de-duplicated against the next pass's head — see
+/// `dedupe_suffix_prefix`.
+const ROLL_KEEP_SAMPLES: usize = 16_000 * 3; // 3s at 16kHz
 
 /// What the FE pill renders during capture. The committed prefix is fixed;
 /// the tentative tail dims to indicate "may still change".
@@ -65,14 +80,26 @@ struct PartialRequest {
 
 /// Inner state shared between the press loop and the worker thread.
 struct Inner {
-    /// Cumulative PCM since dictation began. Cleared on `reset`.
+    /// Cumulative PCM since the most recent roll (or dictation start, if no
+    /// roll has happened yet). The live transcription window operates on
+    /// this buffer alone; older audio's transcript lives in `frozen_text`.
     buffer: Vec<f32>,
     /// Most recent two partial transcripts' word tokens, used for LA2.
+    /// Cleared on every roll so the LA2 algorithm restarts cleanly with
+    /// the post-roll buffer.
     last_two: Option<(Vec<String>, Vec<String>)>,
     /// Time of the last `maybe_tick` flush — gates [`PARTIAL_INTERVAL`].
     last_tick: Instant,
-    /// Once the buffer exceeds [`MAX_STREAMING_SAMPLES`] we stop ticking.
-    overlong: bool,
+    /// LA2-stable prefix accumulated across all prior rolls. Each roll
+    /// appends the most recent committed string to this buffer, then
+    /// resets `last_two` and trims `buffer`. The worker prepends this to
+    /// every emitted partial so the FE pill renders the entire dictation
+    /// from start to current.
+    frozen_text: String,
+    /// Most recent committed string from the worker. Captured here so the
+    /// `maybe_tick` rolling logic can freeze it without coordinating
+    /// directly with the worker thread.
+    last_committed: String,
 }
 
 pub struct StreamingTranscriber {
@@ -98,10 +125,11 @@ impl StreamingTranscriber {
         let (partial_tx, partial_rx) = bounded::<StreamingPartial>(8);
 
         let inner = Arc::new(Mutex::new(Inner {
-            buffer: Vec::with_capacity(MAX_STREAMING_SAMPLES),
+            buffer: Vec::with_capacity(ROLL_THRESHOLD_SAMPLES + ROLL_KEEP_SAMPLES),
             last_two: None,
             last_tick: Instant::now(),
-            overlong: false,
+            frozen_text: String::new(),
+            last_committed: String::new(),
         }));
         let worker_inner = Arc::clone(&inner);
 
@@ -129,26 +157,44 @@ impl StreamingTranscriber {
     /// Append captured PCM. Cheap — just copies into the cumulative buffer.
     pub fn push_audio(&self, frame: &[f32]) {
         let mut g = self.inner.lock();
-        if g.overlong {
-            return;
-        }
         g.buffer.extend_from_slice(frame);
-        if g.buffer.len() > MAX_STREAMING_SAMPLES {
-            g.overlong = true;
-            tracing::info!(
-                "streaming: buffer over {MAX_STREAMING_SAMPLES} samples — partials disabled"
-            );
-        }
     }
 
     /// Try to dispatch a partial pass. Returns true if a request was sent.
     /// Cheap when no work is due (just a clock check).
+    ///
+    /// Performs the commit-and-roll inline: when the live buffer exceeds
+    /// [`ROLL_THRESHOLD_SAMPLES`], the most recent committed text is
+    /// appended to `frozen_text`, the LA2 window is reset, and the buffer
+    /// is trimmed to the last [`ROLL_KEEP_SAMPLES`] of audio (~3s overlap).
+    /// The next tick re-transcribes the overlap as fresh audio; the worker
+    /// de-dupes the suffix-prefix so the displayed prefix doesn't double
+    /// up on the boundary words.
     pub fn maybe_tick(&self) -> bool {
         let snapshot: Option<Vec<f32>> = {
             let mut g = self.inner.lock();
-            if g.overlong {
-                return false;
+
+            // Roll the buffer forward when it crosses the threshold. We do
+            // this BEFORE the time/length gates so a long quiet stretch
+            // doesn't accumulate unbounded audio between ticks.
+            if g.buffer.len() >= ROLL_THRESHOLD_SAMPLES {
+                let frozen_chunk = std::mem::take(&mut g.last_committed);
+                if !frozen_chunk.is_empty() {
+                    if !g.frozen_text.is_empty() {
+                        g.frozen_text.push(' ');
+                    }
+                    g.frozen_text.push_str(&frozen_chunk);
+                }
+                let drop_to = g.buffer.len().saturating_sub(ROLL_KEEP_SAMPLES);
+                g.buffer.drain(..drop_to);
+                g.last_two = None;
+                tracing::info!(
+                    "streaming: rolled buffer (frozen len = {} chars, kept {} samples of audio)",
+                    g.frozen_text.len(),
+                    g.buffer.len(),
+                );
             }
+
             if g.last_tick.elapsed() < PARTIAL_INTERVAL {
                 return false;
             }
@@ -191,28 +237,86 @@ fn worker_loop(
 
         let tokens: Vec<String> = text.split_whitespace().map(|s| s.to_string()).collect();
 
-        let (committed, tentative) = {
+        // Compute LA2 commit + cache it for the next roll, all under a single
+        // lock so the rolling logic sees a consistent view.
+        let (display_committed, tentative) = {
             let mut g = inner.lock();
             let prev = g.last_two.as_ref().map(|(_, p1)| p1.as_slice());
-            let (c, t) = local_agreement_2(prev, &tokens);
+            let (committed, tentative) = local_agreement_2(prev, &tokens);
             // Slide the LA2 window forward.
             g.last_two = Some(match g.last_two.take() {
                 Some((_, prev1)) => (prev1, tokens.clone()),
                 None => (Vec::new(), tokens.clone()),
             });
-            (c, t)
+            // Cache the committed prefix so `maybe_tick` can freeze it on
+            // the next roll without re-running Whisper.
+            g.last_committed = committed.clone();
+
+            // Build the display prefix: prior frozen text + new committed,
+            // with suffix-prefix de-dup so the audio overlap kept after the
+            // last roll doesn't double-print boundary words.
+            let display = if g.frozen_text.is_empty() {
+                committed
+            } else {
+                let deduped = dedupe_suffix_prefix(&g.frozen_text, &committed);
+                if deduped.is_empty() {
+                    g.frozen_text.clone()
+                } else {
+                    format!("{} {}", g.frozen_text, deduped)
+                }
+            };
+            (display, tentative)
         };
 
         tracing::debug!(
-            "streaming partial ({elapsed}ms): committed=\"{committed}\" tentative=\"{tentative}\""
+            "streaming partial ({elapsed}ms): committed=\"{display_committed}\" tentative=\"{tentative}\""
         );
 
         let _ = partials.try_send(StreamingPartial {
-            committed,
+            committed: display_committed,
             tentative,
             at_ms: req.at_ms,
         });
     }
+}
+
+/// Trim the prefix of `fresh` that already appears as a suffix of `frozen`.
+///
+/// After a roll, the streaming buffer keeps ~3s of overlap audio whose
+/// transcription approximately matches the tail of `frozen_text`. Without
+/// this dedup, the display would read "...quick brown fox brown fox jumped"
+/// — the same words show up at the end of frozen and the start of the new
+/// committed string. We greedily find the longest suffix-of-frozen / prefix-
+/// of-fresh match (case-insensitive, punctuation-stripped) up to a small
+/// window, and strip that prefix from `fresh`.
+fn dedupe_suffix_prefix(frozen: &str, fresh: &str) -> String {
+    if frozen.is_empty() || fresh.is_empty() {
+        return fresh.to_string();
+    }
+    let frozen_tokens: Vec<&str> = frozen.split_whitespace().collect();
+    let fresh_tokens: Vec<&str> = fresh.split_whitespace().collect();
+    // The audio overlap is ~3s; rarely more than ~10 words. Capping at 15
+    // bounds the comparison cost and avoids spurious matches deeper in.
+    let max_overlap = frozen_tokens.len().min(fresh_tokens.len()).min(15);
+
+    let normalize = |t: &str| -> String {
+        t.chars()
+            .filter(|c| c.is_alphanumeric())
+            .map(|c| c.to_ascii_lowercase())
+            .collect()
+    };
+
+    for k in (1..=max_overlap).rev() {
+        let frozen_tail: Vec<String> = frozen_tokens[frozen_tokens.len() - k..]
+            .iter()
+            .map(|t| normalize(t))
+            .collect();
+        let fresh_head: Vec<String> = fresh_tokens[..k].iter().map(|t| normalize(t)).collect();
+        if frozen_tail == fresh_head {
+            return fresh_tokens[k..].join(" ");
+        }
+    }
+    fresh.to_string()
 }
 
 /// Local-Agreement-2: given the previous pass's tokens (or `None` on the
@@ -284,10 +388,62 @@ fn run_partial(
 
 #[cfg(test)]
 mod tests {
-    use super::local_agreement_2;
+    use super::{dedupe_suffix_prefix, local_agreement_2};
 
     fn toks(s: &str) -> Vec<String> {
         s.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn dedupe_strips_overlap() {
+        // Frozen tail "fox jumped over" matches the head of fresh.
+        let out = dedupe_suffix_prefix(
+            "the quick brown fox jumped over",
+            "fox jumped over the lazy dog",
+        );
+        assert_eq!(out, "the lazy dog");
+    }
+
+    #[test]
+    fn dedupe_handles_full_overlap() {
+        // The entire fresh string is already in the frozen tail.
+        let out = dedupe_suffix_prefix("alpha bravo charlie", "bravo charlie");
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn dedupe_no_overlap_passes_through() {
+        let out = dedupe_suffix_prefix("the quick brown", "fox jumped over");
+        assert_eq!(out, "fox jumped over");
+    }
+
+    #[test]
+    fn dedupe_is_case_and_punct_insensitive() {
+        // Whisper sometimes flips capitalization between passes; the dedupe
+        // should still find the overlap.
+        let out = dedupe_suffix_prefix("ran the deploy", "Ran the deploy, then waited");
+        assert_eq!(out, "then waited");
+    }
+
+    #[test]
+    fn dedupe_caps_lookback() {
+        // Beyond the 15-token cap we don't try to match — keeps the helper
+        // O(window²) at most.
+        let frozen = (0..30)
+            .map(|i| format!("w{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let fresh = format!("{frozen} extra");
+        // The full-string overlap is 30 tokens but we only check 15; with
+        // no match found within the window, fresh passes through unchanged.
+        let out = dedupe_suffix_prefix(&frozen, &fresh);
+        assert_eq!(out, fresh);
+    }
+
+    #[test]
+    fn dedupe_empty_inputs_are_safe() {
+        assert_eq!(dedupe_suffix_prefix("", "fresh text"), "fresh text");
+        assert_eq!(dedupe_suffix_prefix("frozen text", ""), "");
     }
 
     #[test]

@@ -35,11 +35,18 @@ pub const DEFAULT_MODEL_URL: &str =
 /// Generic English tech-vocab seed prompt — biases Whisper toward
 /// recognising common domain words and proper nouns. Override with
 /// `BOOTHRFLOW_WHISPER_PROMPT` env var for per-user vocabulary.
+///
+/// Capped at 224 tokens by whisper.cpp; this string is well under that
+/// even after the recent expansion, so we have headroom for a few more
+/// terms before needing a per-user (Personal Dictionary) tier.
 const DEFAULT_INITIAL_PROMPT: &str =
     "The transcript may include the following terms: Claude, Claude Code, GPT, OpenAI, \
      Anthropic, Ollama, Tauri, Rust, TypeScript, Svelte, GitHub, kubectl, Kubernetes, \
      Docker, latency, throughput, async, await, refactor, repository, debugger, \
-     middleware, schema, deploy, payload, monorepo, namespace.";
+     middleware, schema, deploy, payload, monorepo, namespace, Qwen, Wispr, Boothe, \
+     boothrflow, Whisper, FluidAudio, Parakeet, sherpa-onnx, llama.cpp, MTLDevice, \
+     Metal, CoreML, Apple Silicon, M-series, Apple Vision, ScreenCaptureKit, \
+     WhisperKit, RNNoise, DeepFilterNet, sqlite-vec, FTS5, nomic-embed, stardate.";
 
 pub struct WhisperSttEngine {
     context: Arc<WhisperContext>,

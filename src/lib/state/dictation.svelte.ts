@@ -31,6 +31,15 @@ export type DonePayload = {
   llm_ms: number;
   paste_ms: number;
   total_ms: number;
+  /**
+   * Cleanup-pass throughput, populated when the LLM backend reports a
+   * `usage` block (Ollama always does; some compat servers don't). All
+   * three are `null` when the LLM was skipped or didn't report — distinct
+   * from `0`, which would mean the call ran but produced no tokens.
+   */
+  llm_prompt_tokens: number | null;
+  llm_completion_tokens: number | null;
+  llm_tok_per_sec: number | null;
 };
 
 /**

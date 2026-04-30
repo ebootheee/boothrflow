@@ -61,6 +61,11 @@ function formatFake(raw: string, style: Style): string {
       return capitalize(cleaned) + "!";
     case "very-casual":
       return cleaned.toLowerCase();
+    case "captains-log":
+      // Web fake doesn't have access to a real cleanup model, so we just
+      // bracket the cleaned text with the canonical opener/closer. The
+      // stardate is the same constant the Rust side uses for fakes.
+      return `Captain's log, stardate 47988.1. ${capitalize(cleaned)}. End log.`;
   }
 }
 

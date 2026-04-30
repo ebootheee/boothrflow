@@ -1,5 +1,7 @@
+use std::time::Instant;
+
 use crate::error::Result;
-use crate::llm::{CleanupRequest, LlmCleanup};
+use crate::llm::{CleanupOutput, CleanupRequest, LlmCleanup};
 use crate::settings::Style;
 
 /// Deterministic LLM stand-in. Strips a fixed set of fillers, applies trivial
@@ -8,9 +10,19 @@ use crate::settings::Style;
 pub struct FakeLlmCleanup;
 
 impl LlmCleanup for FakeLlmCleanup {
-    fn cleanup(&self, req: CleanupRequest<'_>) -> Result<String> {
+    fn cleanup(&self, req: CleanupRequest<'_>) -> Result<CleanupOutput> {
+        let started = Instant::now();
         let cleaned = strip_fillers(req.raw_text);
-        Ok(apply_style(&cleaned, &req.style))
+        let text = apply_style(&cleaned, &req.style);
+        Ok(CleanupOutput {
+            text,
+            // Fakes don't have real token counts; that's `openai_compat`'s
+            // job. Leaving these `None` keeps the production tok/s display
+            // honest about the lack of data.
+            prompt_tokens: None,
+            completion_tokens: None,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+        })
     }
 
     fn name(&self) -> &str {
@@ -54,6 +66,12 @@ fn apply_style(text: &str, style: &Style) -> String {
         Style::Casual => format!("{}{}", first.to_lowercase(), rest),
         Style::Excited => format!("{}{}!", first.to_uppercase(), rest),
         Style::VeryCasual => text.to_lowercase(),
+        Style::CaptainsLog => format!(
+            "Captain's log, stardate {}. {}{}.  End log.",
+            crate::llm::stardate_label(),
+            first.to_uppercase(),
+            rest
+        ),
     }
 }
 
@@ -72,10 +90,13 @@ mod tests {
                 app_context: None,
             })
             .unwrap();
-        assert!(!out.contains("uh"));
-        assert!(!out.contains("basically"));
-        assert!(!out.contains("you"));
-        assert!(out.contains("this"));
+        assert!(!out.text.contains("uh"));
+        assert!(!out.text.contains("basically"));
+        assert!(!out.text.contains("you"));
+        assert!(out.text.contains("this"));
+        // Fakes don't report token counts.
+        assert!(out.prompt_tokens.is_none());
+        assert!(out.completion_tokens.is_none());
     }
 
     #[test]
@@ -88,7 +109,21 @@ mod tests {
                 app_context: None,
             })
             .unwrap();
-        assert!(out.ends_with('.'));
-        assert!(out.starts_with("S"));
+        assert!(out.text.ends_with('.'));
+        assert!(out.text.starts_with("S"));
+    }
+
+    #[test]
+    fn captains_log_prepends_stardate() {
+        let llm = FakeLlmCleanup;
+        let out = llm
+            .cleanup(CleanupRequest {
+                raw_text: "we're approaching the asteroid field",
+                style: Style::CaptainsLog,
+                app_context: None,
+            })
+            .unwrap();
+        assert!(out.text.starts_with("Captain's log, stardate "));
+        assert!(out.text.contains("End log."));
     }
 }
