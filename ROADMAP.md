@@ -47,11 +47,27 @@ no-ops elsewhere.
 Goal: feels like Wispr Flow.
 
 - **LLM cleanup pass** — Qwen 2.5 3B running locally via `llama-cpp-2`. Strips fillers, fixes punctuation, handles course-correction ("go to the store, I mean the office" → "go to the office").
+- **Audio-pipeline noise suppression** — preprocess captured audio _before_ VAD/STT to strip background noise (HVAC hum, keyboard clack, household chatter, lossy bluetooth artifacts). Two viable options to evaluate:
+  - **RNNoise** (Xiph.org, BSD) — tiny GRU-based suppressor, ~85KB model, 10ms latency, runs on CPU at <1% on M-series. Mature, used by Discord/OBS/Mumble. Rust binding via `nnnoiseless` crate (pure-Rust port). Good baseline — the question is whether it's _good enough_ on modern noise vs. paying for the heavier option.
+  - **DeepFilterNet 3** (Hendrik Schröter, MIT) — newer, ONNX-based, ~10MB model, ~5ms per frame on M-series Metal, noticeably cleaner than RNNoise on non-stationary noise (chatter, music). Heavier dep, but Metal-accelerated via `ort` is straightforward.
+
+  Plumbing: insert as an optional stage in `audio/cpal_source.rs` between mono mixdown and the resampler — the suppressor wants 16 kHz mono input, which is exactly the post-resample format, so we'd actually run it _after_ resample for a single-rate path. Toggleable from Settings (off / RNNoise / DeepFilterNet). Default off in v0, evaluate against ground-truth dictations in noisy environments before flipping the default. Pairs naturally with the existing Silero VAD: cleaner input → fewer false-positive speech frames at the start/end of an utterance, which tightens endpointing.
+
 - **Cleanup quality refinements** _(near-term, prompted by Wave 3 dictation UAT)_ — observed gaps from Eric's hands-free dictation pass:
   - **Mumbling / rambling removal.** Filler phrases ("you know", "I mean", "uh", "kind of"), false starts, restarts, and tangential half-sentences should be cleaned up by default in non-Raw styles. Today's prompt asks the model to preserve words exactly. Need a graded mode: keep the meaning, drop the disfluency. Plumbing: a per-style `aggressiveness` flag in the system prompt (0 = preserve verbatim, 1 = drop fillers, 2 = light paraphrase). Casual default = 1.
   - **Bump default to Qwen 2.5 7B.** Wave 3 UAT showed 1.5B is fast (~150-300ms typical) but borderline on quality. 7B costs ~350-400ms which is below the "feels instant" threshold for cleanup (the user has already finished speaking and is watching the paste land). Move `DEFAULT_MODEL` from `qwen2.5:1.5b` to `qwen2.5:7b` once the in-app Settings panel ships so users can drop back to 1.5B if their LLM box is slow. Document as a Reverse-ADR-014 follow-up if we commit.
   - **Vocabulary expansion.** The Whisper `initial_prompt` doesn't currently list "Qwen" (or "Wispr", "Tauri-Specta", "boothrflow", "MTLDevice"…). Misses on those words ride through to the LLM, which can't always recover. Action: append a curated tech-vocab chunk to `DEFAULT_INITIAL_PROMPT` and let the (future) Personal Dictionary append user-specific terms on top.
+  - **Spelled-out word detection** — when the user spells a name or technical term mid-sentence ("my last name is Boothe, B-O-O-T-H-E", "the project is called Q-W-E-N as in queen with a W"), the STT often produces a sequence of letter-tokens that the LLM doesn't know to treat as authoritative. Plumbing: a pre-cleanup pass that scans the raw transcript for spelling patterns —
+    - Hyphen-joined uppercase runs: `B-O-O-T-H-E`, `Q-W-E-N`
+    - Space-separated single-letter sequences: `b o o t h e`, `q w e n`
+    - Letter-word sequences: `bee oh oh tee aitch ee`, `cue double-u ee en`
+    - NATO phonetic: `bravo oscar oscar tango hotel echo`
+    - Cue phrases: "spelled", "as in", "letters"
+
+    — collapses each detected spelling to the literal word, and emits a `<spelling>BOOTHE</spelling>` marker that the LLM cleanup prompt is told to honor as the canonical spelling for the surrounding entity. Bonus: feed confirmed spellings back into the Personal Dictionary so the next dictation gets it right at the STT layer, not the cleanup layer. Reverse pipeline: STT misses → user spells → marker created → LLM applies → dictionary learns → STT no longer misses on subsequent dictations.
+
   - **Connect feedback ratings to model selection.** When the rating tool ships (Phase 3), use bad-rated transcripts to flag prompts that consistently underperform; auto-suggest model upgrades when accuracy drops below a threshold.
+
 - **Streaming partial continuation past the 25 s cap** _(Wave 3 UAT carry-over)_ — the pill stops updating after ~25 s because `MAX_STREAMING_SAMPLES = 16_000 * 25` and Whisper's 30 s context window starts to drop early audio. Final transcript on release is still complete; only the live display freezes. Approach: a commit-and-roll loop in `streaming.rs`. When the buffer crosses ~20 s and LA2 has a long stable prefix, freeze that prefix into a separate `frozen_text: String` field on `Inner`, trim the buffer to the last ~5 s of audio (overlap), and continue ticking. Worker emits `StreamingPartial { committed: frozen + new_committed, tentative, … }`. Bounded per-tick cost, indefinite session length, minimal boundary-word risk. Same final-pass fallback semantics. ~half-day of work.
 - **Style presets** — Formal, Casual, Excited, Very Casual + custom.
 - **App-context detection** — `GetForegroundWindow` + UI Automation to detect Slack vs Gmail vs IDE, applies the right style automatically.
