@@ -66,7 +66,25 @@ Goal: feels like Wispr Flow.
 
     — collapses each detected spelling to the literal word, and emits a `<spelling>BOOTHE</spelling>` marker that the LLM cleanup prompt is told to honor as the canonical spelling for the surrounding entity. Bonus: feed confirmed spellings back into the Personal Dictionary so the next dictation gets it right at the STT layer, not the cleanup layer. Reverse pipeline: STT misses → user spells → marker created → LLM applies → dictionary learns → STT no longer misses on subsequent dictations.
 
+  - **Context-aware reflection ("does this make sense?")** — when a user dictates fast, Whisper can produce homophone-substitutions and acoustic mishears that survive cleanup because the LLM is told to preserve words exactly. Today's prompt: "Add periods, commas, … Do NOT change words". Wanted behavior: the LLM should be allowed to swap a transcribed word for the contextually-correct one when the original is _semantically nonsensical_ in context — "the patch landed in the rebase" stays as is, but "the patch landed in the bay sis" becomes "basis", and "we deployed to the cluster fluffer" becomes "cluster buffer" (or whichever fits surrounding context). Three implementation tiers, ship in order:
+    1. **Single-pass with reflection in the system prompt** (cheap, ~no latency cost) — extend the prompt with: "If a word is acoustically plausible but semantically nonsensical in context, replace it with the most likely intended word and wrap your replacement in `<corrected from='X'>Y</corrected>` for the first dictation; once the correction tracker matures, drop the marker." Single LLM call, just a smarter prompt.
+    2. **Confidence-flagged reflection** (medium, ~20% latency cost) — Whisper exposes per-token logprobs via `whisper-rs`'s segment iterator. Tokens with logprob below a threshold get tagged in the LLM prompt as "uncertain": "the cluster `<uncertain>fluffer</uncertain>` is down" → LLM is explicitly invited to consider alternatives at that position. More accurate than #1 because the LLM knows _where_ to focus.
+    3. **Two-pass reflection** (heaviest, ~2× latency) — first pass does normal cleanup, second pass reads its own output and is asked "is anything off?". Drops to single-pass when first-pass output looks confident (no uncertainty markers, no flagged tokens). Reserve for a "Quality" preset that the user opts into when they don't care about latency.
+
+    All three tiers feed `<corrected>` markers into the history record so the user can see what was changed; rating the result becomes a strong feedback signal for the self-learning loop in Phase 3. Prereq: aggressiveness flag must be ≥ 1 (otherwise we're contradicting the per-style "preserve verbatim" instruction).
+
   - **Connect feedback ratings to model selection.** When the rating tool ships (Phase 3), use bad-rated transcripts to flag prompts that consistently underperform; auto-suggest model upgrades when accuracy drops below a threshold.
+
+- **OCR the focused window as cleanup context** _(pattern from [matthartman/ghost-pepper](https://github.com/matthartman/ghost-pepper))_ — before running cleanup, screenshot the frontmost window, run on-device OCR (macOS: Apple Vision; Windows: Win32 OCR or Tesseract), and feed the recognized text into the cleanup prompt under an `<OCR-RULES>` block: _"Use the window OCR only as supporting context. Prefer the spoken words, but if a spoken word is a recognition miss for a name, command, file, or jargon visible in the OCR, correct it."_ Two-pronged win: (a) proper nouns visible on screen get auto-corrected without the user maintaining a vocab list; (b) the cleanup pass becomes context-aware (replying to a Slack thread? Editing a doc? The model sees what you see). Plumbing: a new `Context/` Rust module mirroring ghost-pepper's `OCRContext` + `FrontmostWindowOCRService` shapes. Permission gate: macOS Screen Recording (in addition to existing Mic/Accessibility/Input Monitoring); Windows is unrestricted. Defer to a Phase 2 sub-feature; entirely optional via Settings toggle, with a privacy callout explaining what's captured (the OCR'd text never leaves the machine — feeds the local LLM and is then dropped).
+- **Auto-learning correction store** _(pattern from ghost-pepper's `PostPasteLearningCoordinator`)_ — passive self-improvement loop. After every paste, poll the focused text field for ~15 s (1 s cadence). When the field stops changing for ~2 s, diff what we pasted against what the user kept. If the diff is a narrow correction (≤2 words), record `MisheardReplacement { wrong: "kwen", right: "Qwen" }` into a `CorrectionStore` SQLite table. Subsequent cleanup prompts include the user's top-N learned corrections as a `<USER-CORRECTIONS>` block: _"Treat these substitutions as authoritative."_ Closes the same loop as the planned spelling-detection feature but without requiring the user to spell anything — they just edit naturally and the system learns. Strictly better than rating-based feedback (passive, no UI friction) and complements it (ratings tell us when the cleanup _approach_ is wrong; this learns the _vocabulary_).
+
+  Also exposes two user-editable lists in Settings:
+  - `preferredTranscriptions` (newline-separated vocabulary, augments the Whisper `initial_prompt`)
+  - `commonlyMisheard` (`wrong -> right` lines, augments the cleanup prompt's `<USER-CORRECTIONS>` block)
+
+  Both auto-populate from the learning coordinator and accept manual edits. Direct lift from ghost-pepper's `CorrectionStore` design — proven UX.
+
+- **Prompt prefix caching** _(pattern from ghost-pepper's `CleanupPromptPrefillPlan`)_ — split the cleanup prompt into a static prefix (system instructions + `<USER-CORRECTIONS>` + Style block) and a dynamic suffix (OCR context + the actual transcript). Send the prefix once per Settings change; subsequent dictations only re-encode the dynamic suffix. Ollama supports this via `keep_alive` + reusing context across requests, or via the `/api/generate` endpoint's `context` field. Latency cut for second-and-later dictations within a session — typically saves the entire prompt-eval portion (~150-300 ms on 1.5B Qwen, more on 7B).
 
 - **Streaming partial continuation past the 25 s cap** _(Wave 3 UAT carry-over)_ — the pill stops updating after ~25 s because `MAX_STREAMING_SAMPLES = 16_000 * 25` and Whisper's 30 s context window starts to drop early audio. Final transcript on release is still complete; only the live display freezes. Approach: a commit-and-roll loop in `streaming.rs`. When the buffer crosses ~20 s and LA2 has a long stable prefix, freeze that prefix into a separate `frozen_text: String` field on `Inner`, trim the buffer to the last ~5 s of audio (overlap), and continue ticking. Worker emits `StreamingPartial { committed: frozen + new_committed, tentative, … }`. Bounded per-tick cost, indefinite session length, minimal boundary-word risk. Same final-pass fallback semantics. ~half-day of work.
 - **Style presets** — Formal, Casual, Excited, Very Casual + custom.
@@ -111,11 +129,29 @@ Goal: 1.0.
 - **Auto-update** — `tauri-plugin-updater` + GitHub Releases.
 - **macOS port** — WhisperKit on Apple Neural Engine, AXUIElement for paste injection.
 - **Linux port** — sherpa-onnx works the same; X11 + Wayland injection paths.
+- **Privacy audit doc** _(pattern from ghost-pepper)_ — ship `PRIVACY_AUDIT.md` containing (a) the exact prompt to feed Claude Code (or any AI assistant) to verify all default features are 100% local, (b) a checklist of subsystems with file pointers and pass/fail status, (c) an explicit list of opt-in cloud features (BYOK LLM endpoint, BYOK embed endpoint) showing they're disabled by default. Run the audit on every release and store dated results in the same file. Cheap to author (1-2 hours), high trust signal — and exactly the kind of thing reviewers and HN commenters notice immediately.
+
+## Phase 5 — Meeting transcription mode
+
+A new product surface beyond push-to-talk dictation, inspired by ghost-pepper.
+
+Goal: continuous-recording meetings produce transcript + summary as markdown automatically.
+
+- **Dual-stream capture** — concurrent mic (cpal / WASAPI) and system-audio (macOS ScreenCaptureKit, Windows WASAPI loopback, Linux PulseAudio monitor) capture, each tagged with source. Solves the "I can't hear the other side of the call" problem.
+- **Chunked transcription pipeline** — 30 s chunks with 1 s overlap for dedup, disk-spilled after transcription so memory stays bounded over multi-hour meetings. Different pipeline from PTT (which is single-utterance + LA2 streaming); meeting mode does coarse-grained chunks + diarization.
+- **Speaker diarization** — pyannote-onnx or sherpa-onnx speaker diarization on the chunk WAVs post-meeting; map clusters to known voices via a `RecognizedVoiceStore` (you tag a few seconds of "this is me" once, future meetings auto-label).
+- **Summary generation** — feed the diarized transcript to the local LLM with a meeting-summary prompt; output as markdown (decisions, action items, open questions) saved to a user-chosen folder. Same model as cleanup but a different prompt.
+- **Meeting detection** — heuristic (windowed: Zoom / Meet / Teams / FaceTime in foreground? + mic active? + camera active?) auto-suggests starting a recording; user accepts / dismisses. Privacy-conscious — never auto-records without consent.
+- **Markdown library** — local folder of meeting markdowns becomes searchable via the same FTS5 + nomic-embed-text infra we already use for dictation history. One unified search across "things I dictated" and "things people said in meetings."
+- **Imports** — Granola-style: pull existing meeting notes from another app and index them. Read-only, just augments the searchable corpus.
 
 ## Beyond v1
 
 - **Snippets** — voice-activated text expanders.
 - **Plugin API** — pre-STT, post-STT, pre-paste hooks (WASM-sandboxed).
+- **Sound effects** _(ghost-pepper polish)_ — subtle "ding" on dictation start, softer "click" on paste-complete. Off by default to avoid surprising users; on by default for meeting recording start/stop where the audio cue is information, not noise.
+- **Prompt editor window** _(ghost-pepper UI)_ — first-class UI for editing the cleanup system prompt, with reset-to-defaults, save, and live preview against a stored test transcript. Bigger than the in-app Settings field; lives in its own window like ghost-pepper's `PromptEditorWindow`.
+- **Transcription Lab** _(ghost-pepper dev tooling, optionally exposed to power users)_ — a "lab" view where you can replay stored audio fixtures against the current STT/LLM stack and diff outputs across model + prompt configurations. Originally a developer tool for iterating on prompts; valuable enough to expose to users tuning their own setup.
 - **LoRA fine-tuning** on your own dictation history (opt-in). See the self-learning loop in Phase 3 for the corpus + DPO sketch.
 - **"Whisper Mode"** — sub-audible speech (custom acoustic model required).
 - **Insights dashboard** — words/day, accuracy delta, top apps, rating trend.
