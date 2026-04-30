@@ -101,14 +101,10 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
 
     #[cfg(target_os = "macos")]
     {
-        // The generated macOS icon is an alpha-mask template image designed
-        // for NSStatusItem. Template mode lets AppKit adapt it for dark/light
-        // menu bars; using the full-color app/window icon here made the status
-        // item effectively invisible on at least one Apple Silicon Mac. Keep
-        // a text title while we are in menu-bar-only mode so the restore
-        // surface is unmistakable even if the icon lands near the notch or
-        // among a crowded set of status items.
-        builder = builder.icon_as_template(true).title("boothrflow");
+        // Use the actual app icon, not template mode. The status item needs
+        // to be icon-only, and template-rendering the colored app icon turns
+        // its mostly-opaque square background into a blank-looking block.
+        builder = builder.icon_as_template(false);
     }
 
     builder
@@ -152,7 +148,13 @@ fn dictation_hotkey_label() -> &'static str {
 
 #[cfg(target_os = "macos")]
 fn tray_icon(_app: &AppHandle) -> Result<Image<'static>> {
-    Ok(macos_template_icon())
+    macos_app_icon()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_app_icon() -> Result<Image<'static>> {
+    Image::from_bytes(include_bytes!("../icons/32x32.png"))
+        .map_err(|e| BoothError::internal(format!("load macOS tray icon: {e}")))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -164,7 +166,7 @@ fn tray_icon(app: &AppHandle) -> Result<Image<'static>> {
 
 #[cfg(target_os = "macos")]
 fn tray_icon_kind() -> &'static str {
-    "macOS template"
+    "macOS app"
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -172,72 +174,15 @@ fn tray_icon_kind() -> &'static str {
     "default window"
 }
 
-#[cfg(target_os = "macos")]
-fn macos_template_icon() -> Image<'static> {
-    const SIZE: u32 = 44;
-    let mut rgba = vec![0_u8; (SIZE * SIZE * 4) as usize];
-
-    // A compact mic-shaped alpha mask. RGB is ignored in template mode; alpha
-    // defines the visible shape and AppKit supplies the menu-bar color.
-    fill_rounded_rect(&mut rgba, SIZE, 16, 6, 28, 27, 7);
-    fill_rounded_rect(&mut rgba, SIZE, 13, 19, 16, 31, 2);
-    fill_rounded_rect(&mut rgba, SIZE, 28, 19, 31, 31, 2);
-    fill_rounded_rect(&mut rgba, SIZE, 20, 28, 24, 36, 2);
-    fill_rounded_rect(&mut rgba, SIZE, 13, 36, 31, 40, 2);
-
-    Image::new_owned(rgba, SIZE, SIZE)
-}
-
-#[cfg(target_os = "macos")]
-fn fill_rounded_rect(
-    rgba: &mut [u8],
-    size: u32,
-    left: u32,
-    top: u32,
-    right: u32,
-    bottom: u32,
-    radius: u32,
-) {
-    let r2 = (radius as i32) * (radius as i32);
-
-    for y in top..bottom {
-        for x in left..right {
-            let dx = if x < left + radius {
-                (left + radius - x) as i32
-            } else if x >= right - radius {
-                (x - (right - radius - 1)) as i32
-            } else {
-                0
-            };
-            let dy = if y < top + radius {
-                (top + radius - y) as i32
-            } else if y >= bottom - radius {
-                (y - (bottom - radius - 1)) as i32
-            } else {
-                0
-            };
-            if dx * dx + dy * dy > r2 {
-                continue;
-            }
-
-            let i = ((y * size + x) * 4) as usize;
-            rgba[i] = 0;
-            rgba[i + 1] = 0;
-            rgba[i + 2] = 0;
-            rgba[i + 3] = 255;
-        }
-    }
-}
-
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::macos_template_icon;
+    use super::macos_app_icon;
 
     #[test]
-    fn macos_template_icon_is_status_bar_sized_alpha_mask() {
-        let icon = macos_template_icon();
-        assert_eq!(icon.width(), 44);
-        assert_eq!(icon.height(), 44);
+    fn macos_tray_icon_loads_the_app_icon() {
+        let icon = macos_app_icon().expect("tray icon should load");
+        assert_eq!(icon.width(), 32);
+        assert_eq!(icon.height(), 32);
 
         let opaque_pixels = icon
             .rgba()
@@ -245,6 +190,5 @@ mod tests {
             .filter(|pixel| pixel[3] > 0)
             .count();
         assert!(opaque_pixels > 0);
-        assert!(opaque_pixels < (icon.width() * icon.height()) as usize);
     }
 }
