@@ -39,25 +39,19 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
         .ok_or_else(|| BoothError::internal("no default window icon"))?
         .clone();
 
-    let mut tray_builder = TrayIconBuilder::with_id("boothrflow-tray")
+    // Build the tray with the regular full-color icon. We previously tried
+    // `icon_as_template(true)` for dark/light adaptation, but our default
+    // window icon isn't a proper template image (it's a colored PNG with
+    // mostly-opaque alpha) so the template renderer produced a near-blank
+    // silhouette that looked like "no tray icon at all" in UAT. Reverted
+    // to the colored icon until we ship a dedicated monochrome tray asset.
+    TrayIconBuilder::with_id("boothrflow-tray")
         .icon(icon)
         .tooltip(format!(
             "boothrflow — idle ({} to dictate)",
             dictation_hotkey_label()
         ))
-        .menu(&menu);
-
-    // macOS-only: mark the icon as a template so AppKit renders it in
-    // black/white that adapts to the menu-bar's appearance (and to dark
-    // mode). Without this, our colored .png icon can be invisible on a
-    // dark menu bar — which looked like "the tray icon never showed up"
-    // in Wave 4a UAT. The full-color icon is still used in the dock.
-    #[cfg(target_os = "macos")]
-    {
-        tray_builder = tray_builder.icon_as_template(true);
-    }
-
-    tray_builder
+        .menu(&menu)
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "open" => {
                 if let Some(window) = app.get_webview_window("main") {

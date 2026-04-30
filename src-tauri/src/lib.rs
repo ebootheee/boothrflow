@@ -129,9 +129,26 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle().clone();
 
+            // macOS: switch to a menu-bar-only "accessory" app. Drops the
+            // dock icon entirely, removes the app from Cmd-Tab, and gives
+            // us a single clean entry point through the tray icon. Matches
+            // the pattern of Notion's tray helper, Claude Desktop's tray
+            // mode, and ghost-pepper. Wave 4a UAT showed the dual dock-
+            // icon-plus-tray-icon mode produced confusing close/relaunch
+            // behavior and dock clicks that didn't restore the window;
+            // accessory mode collapses both surfaces into one.
+            //
+            // Works in `tauri dev` too — no Info.plist gymnastics needed.
+            #[cfg(target_os = "macos")]
+            {
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
             // System tray with Open / Pause / Quit menu.
             if let Err(e) = tray::create_tray(&handle) {
                 tracing::warn!("could not create tray icon: {e}");
+            } else {
+                tracing::info!("tray: created — look for the boothrflow icon in the menu bar");
             }
 
             // Pre-warm the listen-pill overlay so first-press latency is low.
