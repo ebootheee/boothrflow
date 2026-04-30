@@ -71,7 +71,19 @@
   let historyClearing = $state(false);
   let autostartEnabled = $state<boolean | null>(null);
   let autostartBusy = $state(false);
+  let micAvailable = $state<boolean | null>(null);
   const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+
+  type PermissionPane = "microphone" | "accessibility" | "input_monitoring";
+  async function openPermissionPane(pane: PermissionPane) {
+    if (!isTauri()) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_macos_setting", { pane });
+    } catch (e) {
+      console.warn("open_macos_setting failed:", e);
+    }
+  }
   // We mirror what the daemon will pick at startup so users see real values,
   // not blanks: empty endpoint/model fall back to defaults on the Rust side.
   let effectiveEndpoint = $derived(settings.llm.endpoint.trim() || DEFAULT_ENDPOINT);
@@ -119,6 +131,14 @@
       autostartEnabled = await isEnabled();
     } catch (e) {
       console.warn("autostart isEnabled failed:", e);
+    }
+    if (isMac) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        micAvailable = await invoke<boolean>("microphone_available");
+      } catch (e) {
+        console.warn("microphone_available failed:", e);
+      }
     }
   });
 
@@ -418,6 +438,51 @@
             </label>
           </div>
         </section>
+
+        {#if isMac}
+          <section class="card">
+            <div class="card-head">
+              <h3>macOS permissions</h3>
+              <p class="card-sub">
+                Open the relevant pane in System Settings, toggle the switch for boothrflow (or your
+                terminal in dev), then restart the app.
+              </p>
+            </div>
+
+            <div class="perm-row">
+              <div class="perm-meta">
+                <strong>Microphone</strong>
+                <small>Capture your voice for dictation</small>
+              </div>
+              {#if micAvailable === false}
+                <span class="badge fail">Blocked</span>
+              {:else if micAvailable === true}
+                <span class="badge ok">OK</span>
+              {/if}
+              <button class="perm-open" onclick={() => void openPermissionPane("microphone")}
+                >Open</button
+              >
+            </div>
+            <div class="perm-row">
+              <div class="perm-meta">
+                <strong>Accessibility</strong>
+                <small>Paste the transcript into the focused application</small>
+              </div>
+              <button class="perm-open" onclick={() => void openPermissionPane("accessibility")}
+                >Open</button
+              >
+            </div>
+            <div class="perm-row">
+              <div class="perm-meta">
+                <strong>Input Monitoring</strong>
+                <small>Global push-to-talk hotkey when unfocused</small>
+              </div>
+              <button class="perm-open" onclick={() => void openPermissionPane("input_monitoring")}
+                >Open</button
+              >
+            </div>
+          </section>
+        {/if}
 
         <div class="actions">
           <button class="secondary" onclick={restartApp}>Restart app</button>
@@ -867,6 +932,65 @@
   .badge.ok {
     background: var(--mint-soft, #e5f5f1);
     color: var(--mint, #208f83);
+  }
+  .badge.fail {
+    background: #fdecea;
+    color: #b03028;
+  }
+  .card-head {
+    margin-bottom: 10px;
+  }
+  .card-head h3 {
+    margin: 0 0 2px 0;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  .card-sub {
+    margin: 0;
+    font-size: 12px;
+    color: var(--subtle, #637176);
+    line-height: 1.5;
+  }
+  .perm-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-top: 1px solid var(--line-soft, #e8eeec);
+  }
+  .perm-row:first-of-type {
+    border-top: 0;
+  }
+  .perm-meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .perm-meta strong {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .perm-meta small {
+    font-size: 11.5px;
+    color: var(--subtle, #637176);
+    line-height: 1.4;
+  }
+  .perm-open {
+    padding: 5px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--line, #d7e0dd);
+    background: var(--paper, #fff);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--ink, #172024);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .perm-open:hover {
+    background: var(--muted, #eef3f1);
   }
   a {
     color: var(--brand, #d95e54);

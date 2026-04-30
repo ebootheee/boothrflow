@@ -38,6 +38,8 @@
   const isPill = hash === "#listen-pill";
   const isQuickPaste = hash === "#quick-paste";
   const inDesktop = isTauri();
+
+  let settingsOpen = $state(false);
   const dictationHotkey = dictationHotkeyLabel();
   const quickPasteHotkey = quickPasteHotkeyLabel();
   const toggleDictationHotkey = toggleDictationHotkeyLabel();
@@ -112,9 +114,7 @@
   // panes on demand so the user isn't hunting through System Preferences.
   const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
   let micAvailable = $state<boolean | null>(null);
-  let permissionsOpen = $state(false);
   let permissionsDismissed = $state(false);
-  let settingsOpen = $state(false);
   let activeLlmModel = $state<string | null>(null);
   let llmDisabled = $state(false);
 
@@ -217,12 +217,26 @@
       case "skipped-raw":
         return "off (raw)";
       case "skipped-short":
-        return "skipped";
+        return "skipped · too short";
       case "unreachable":
         return "unreachable";
       case "idle":
       default:
         return llmMs ? formatMs(llmMs) : "0 ms";
+    }
+  }
+  function llmDisplayTitle(): string {
+    switch (llmStatus) {
+      case "skipped-short":
+        return "Cleanup is bypassed for transcripts under 6 words — punctuation/casing rarely matters for short utterances. Dictate a longer phrase to exercise the LLM.";
+      case "skipped-raw":
+        return "Style is set to Raw — cleanup is intentionally off. Switch to Casual/Formal/etc. to enable.";
+      case "unreachable":
+        return "The configured LLM endpoint didn't respond. Check Settings → LLM → Test connection.";
+      case "ran":
+        return `LLM cleanup ran in ${formatMs(llmMs)}.`;
+      default:
+        return "";
     }
   }
   const captureSeconds = $derived(
@@ -322,8 +336,8 @@
     void dictationStore.attach();
     void loadHistory();
     void probeMicrophone();
-    void probeWhisperModel();
     void loadLlmConfig();
+    void probeWhisperModel();
   });
 
   // Refresh history whenever a fresh dictation completes so the new entry
@@ -375,15 +389,6 @@
         <kbd title="Open quick-paste palette"
           ><Icon name="history" size={13} /> {quickPasteHotkey}</kbd
         >
-        {#if isMac && inDesktop}
-          <button
-            class="quiet-button"
-            type="button"
-            onclick={() => (permissionsOpen = !permissionsOpen)}
-          >
-            <Icon name="lock" size={13} /> Permissions
-          </button>
-        {/if}
         <button
           class="quiet-button settings-button"
           type="button"
@@ -440,67 +445,6 @@
       </section>
     {/if}
 
-    {#if isMac && inDesktop && permissionsOpen}
-      <section class="panel permissions-panel" aria-labelledby="permissions-heading">
-        <div class="panel-head">
-          <div>
-            <span class="section-kicker">macOS</span>
-            <h2 id="permissions-heading">Permissions</h2>
-          </div>
-          <button class="quiet-button" type="button" onclick={() => (permissionsOpen = false)}
-            >Close</button
-          >
-        </div>
-        <p class="permissions-help">
-          boothrflow needs three permissions on macOS. Click each to open the relevant pane in
-          System Settings, toggle the switch for boothrflow (or for your terminal in dev), then
-          relaunch the app for the change to take effect.
-        </p>
-        <ol class="pipeline-list">
-          <li>
-            <span class="step-icon"><Icon name="mic" size={14} /></span>
-            <div>
-              <strong>Microphone</strong>
-              <small
-                >{micAvailable === false
-                  ? "Currently blocked — capture will fail"
-                  : "Used to capture your voice for dictation"}</small
-              >
-            </div>
-            <button
-              class="quiet-button"
-              type="button"
-              onclick={() => void openPermissionPane("microphone")}>Open</button
-            >
-          </li>
-          <li>
-            <span class="step-icon"><Icon name="zap" size={14} /></span>
-            <div>
-              <strong>Accessibility</strong>
-              <small>Used to paste the transcript into the focused application</small>
-            </div>
-            <button
-              class="quiet-button"
-              type="button"
-              onclick={() => void openPermissionPane("accessibility")}>Open</button
-            >
-          </li>
-          <li>
-            <span class="step-icon"><Icon name="command" size={14} /></span>
-            <div>
-              <strong>Input Monitoring</strong>
-              <small>Required for the global push-to-talk hotkey to fire when unfocused</small>
-            </div>
-            <button
-              class="quiet-button"
-              type="button"
-              onclick={() => void openPermissionPane("input_monitoring")}>Open</button
-            >
-          </li>
-        </ol>
-      </section>
-    {/if}
-
     <section class="toolbar" aria-label="Dictation controls and model status">
       <label class="field compact-field">
         <span>Style</span>
@@ -524,7 +468,7 @@
         <strong>Whisper {whisperLabel(whisperModel)}</strong>
         <small>{formatMs(sttMs)}</small>
       </div>
-      <div class="model-chip">
+      <div class="model-chip" title={llmDisplayTitle()}>
         <span>Cleanup</span>
         <strong>{cleanupModel}</strong>
         <small>{llmDisplay()}</small>
