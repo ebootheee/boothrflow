@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Icon, { type IconName } from "$lib/components/Icon.svelte";
   import ListenPill from "$lib/components/ListenPill.svelte";
+  import Settings from "$lib/components/Settings.svelte";
   import {
     dictationHotkeyLabel,
     isTauri,
@@ -113,6 +114,28 @@
   let micAvailable = $state<boolean | null>(null);
   let permissionsOpen = $state(false);
   let permissionsDismissed = $state(false);
+  let settingsOpen = $state(false);
+  let activeLlmModel = $state<string | null>(null);
+  let llmDisabled = $state(false);
+
+  async function loadLlmConfig() {
+    if (!inDesktop) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const got = await invoke<{
+        llm: {
+          endpoint: string;
+          model: string;
+          apiKey: string;
+          disabled: boolean;
+        };
+      }>("app_settings_get");
+      activeLlmModel = got?.llm?.model?.trim() || "qwen2.5:1.5b";
+      llmDisabled = got?.llm?.disabled ?? false;
+    } catch (e) {
+      console.warn("app_settings_get failed:", e);
+    }
+  }
 
   async function probeMicrophone() {
     if (!inDesktop) {
@@ -217,7 +240,11 @@
   );
 
   const cleanupModel = $derived(
-    settings.style === "raw" ? "Bypass" : "Qwen 2.5 / OpenAI-compatible",
+    settings.style === "raw"
+      ? "Bypass"
+      : llmDisabled
+        ? "Disabled"
+        : (activeLlmModel ?? "qwen2.5:1.5b"),
   );
   const embeddingModel = $derived(displayStats?.embed_model ?? "Off");
 
@@ -296,6 +323,7 @@
     void loadHistory();
     void probeMicrophone();
     void probeWhisperModel();
+    void loadLlmConfig();
   });
 
   // Refresh history whenever a fresh dictation completes so the new entry
@@ -356,8 +384,21 @@
             <Icon name="lock" size={13} /> Permissions
           </button>
         {/if}
+        <button
+          class="quiet-button settings-button"
+          type="button"
+          onclick={() => (settingsOpen = true)}
+          aria-label="Open settings"
+          title="Settings"
+        >
+          <Icon name="settings" size={14} strokeWidth={1.8} />
+        </button>
       </div>
     </header>
+
+    {#if settingsOpen}
+      <Settings onClose={() => (settingsOpen = false)} />
+    {/if}
 
     {#if dictationStore.modelMissing}
       <section class="notice" aria-live="polite">

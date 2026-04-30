@@ -511,6 +511,19 @@ kbd {
   background: var(--muted);
 }
 
+.quiet-button.settings-button {
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--subtle);
+}
+.quiet-button.settings-button:hover {
+  color: var(--ink);
+}
+
 .history-table {
   display: grid;
   overflow: hidden;

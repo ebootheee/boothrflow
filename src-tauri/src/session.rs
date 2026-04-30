@@ -102,6 +102,13 @@ mod real {
     }
 
     fn run(app: AppHandle, history: Option<Arc<HistoryStore>>) -> crate::error::Result<()> {
+        use tauri::Manager;
+        let app_data_dir = app
+            .path()
+            .app_data_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let app_settings = crate::app_settings::load(&app_data_dir);
+
         let hotkey = RdevHotkeySource::new();
         let hotkey_rx = hotkey.start()?;
         tracing::info!("session daemon ready — Ctrl+Meta to dictate");
@@ -126,43 +133,48 @@ mod real {
         // LLM cleanup via OpenAI-compatible HTTP. Ollama on localhost:11434
         // by default; configurable via BOOTHRFLOW_LLM_* env vars. Failures
         // (server down, model missing, timeout) fall back to raw transcript.
-        let llm: Option<OpenAiCompatLlmCleanup> = match OpenAiCompatLlmCleanup::from_env() {
-            None => {
-                tracing::info!("llm: disabled via BOOTHRFLOW_LLM_DISABLED");
-                None
-            }
-            Some(Ok(engine)) => {
-                tracing::info!(
-                    "llm: openai-compat HTTP (endpoint={}, model={})",
-                    engine.endpoint(),
-                    engine.model()
-                );
-                // Pre-warm in a background thread so the first user dictation
-                // doesn't pay the model-load tax (typically 3-5s the first
-                // time Ollama touches a freshly-pulled model).
-                let prewarm_endpoint = engine.endpoint().to_string();
-                let prewarm_model = engine.model().to_string();
-                let prewarm_key = std::env::var("BOOTHRFLOW_LLM_API_KEY").ok();
-                std::thread::Builder::new()
-                    .name("boothrflow-llm-prewarm".into())
-                    .spawn(move || {
-                        if let Ok(warm) = OpenAiCompatLlmCleanup::new(
-                            prewarm_endpoint,
-                            prewarm_model,
-                            prewarm_key,
-                        ) {
-                            warm.prewarm();
-                        }
-                    })
-                    .ok();
-                Some(engine)
-            }
-            Some(Err(e)) => {
-                tracing::warn!("llm: client init failed, falling back to raw: {e}");
-                let _ = app.emit("dictation:llm-missing", e.to_string());
-                None
-            }
-        };
+        let llm: Option<OpenAiCompatLlmCleanup> =
+            match OpenAiCompatLlmCleanup::from_settings_or_env(&app_settings.llm) {
+                None => {
+                    tracing::info!("llm: disabled via settings or BOOTHRFLOW_LLM_DISABLED");
+                    None
+                }
+                Some(Ok(engine)) => {
+                    tracing::info!(
+                        "llm: openai-compat HTTP (endpoint={}, model={})",
+                        engine.endpoint(),
+                        engine.model()
+                    );
+                    // Pre-warm in a background thread so the first user dictation
+                    // doesn't pay the model-load tax (typically 3-5s the first
+                    // time Ollama touches a freshly-pulled model).
+                    let prewarm_endpoint = engine.endpoint().to_string();
+                    let prewarm_model = engine.model().to_string();
+                    let prewarm_key = if !app_settings.llm.api_key.is_empty() {
+                        Some(app_settings.llm.api_key.clone())
+                    } else {
+                        std::env::var("BOOTHRFLOW_LLM_API_KEY").ok()
+                    };
+                    std::thread::Builder::new()
+                        .name("boothrflow-llm-prewarm".into())
+                        .spawn(move || {
+                            if let Ok(warm) = OpenAiCompatLlmCleanup::new(
+                                prewarm_endpoint,
+                                prewarm_model,
+                                prewarm_key,
+                            ) {
+                                warm.prewarm();
+                            }
+                        })
+                        .ok();
+                    Some(engine)
+                }
+                Some(Err(e)) => {
+                    tracing::warn!("llm: client init failed, falling back to raw: {e}");
+                    let _ = app.emit("dictation:llm-missing", e.to_string());
+                    None
+                }
+            };
 
         // Injector. ClipboardInjector init failure is rare (would mean
         // OS-level clipboard access denied); we still keep the daemon

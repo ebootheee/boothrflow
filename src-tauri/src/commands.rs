@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::app_settings::{self, AppSettings};
 use crate::audio::FakeAudioSource;
 use crate::context::FixedContextDetector;
 use crate::error::BoothError;
@@ -244,6 +245,118 @@ pub struct DictateResult {
     pub formatted: String,
     pub duration_ms: u64,
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// App settings (LLM endpoint config) + LLM diagnostics
+// ────────────────────────────────────────────────────────────────────────
+
+fn app_data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
+    use tauri::Manager;
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+#[tauri::command]
+pub fn app_settings_get(app: tauri::AppHandle) -> AppSettings {
+    app_settings::load(&app_data_dir(&app))
+}
+
+#[tauri::command]
+pub fn app_settings_save(app: tauri::AppHandle, settings: AppSettings) -> Result<(), BoothError> {
+    app_settings::save(&app_data_dir(&app), &settings)
+        .map_err(|e| BoothError::internal(format!("save settings: {e}")))
+}
+
+#[derive(Debug, Serialize)]
+pub struct LlmTestResult {
+    pub ok: bool,
+    pub latency_ms: u64,
+    pub status: Option<u16>,
+    pub error: Option<String>,
+}
+
+/// Hit `<endpoint>` (chat-completions URL) with a 1-token request and report
+/// back. Used by Settings → "Test connection". Times out at 10s.
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+pub async fn llm_test_connection(
+    endpoint: String,
+    model: String,
+    api_key: Option<String>,
+) -> LlmTestResult {
+    use std::time::{Duration, Instant};
+    let started = Instant::now();
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [{"role":"user","content":"ping"}],
+        "max_tokens": 1,
+        "stream": false,
+    });
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return LlmTestResult {
+                ok: false,
+                latency_ms: 0,
+                status: None,
+                error: Some(format!("client: {e}")),
+            };
+        }
+    };
+    let mut req = client.post(&endpoint).json(&body);
+    if let Some(k) = api_key.filter(|k| !k.is_empty()) {
+        req = req.bearer_auth(k);
+    }
+    match req.send().await {
+        Ok(res) => {
+            let status = res.status();
+            let latency_ms = started.elapsed().as_millis() as u64;
+            if status.is_success() {
+                LlmTestResult {
+                    ok: true,
+                    latency_ms,
+                    status: Some(status.as_u16()),
+                    error: None,
+                }
+            } else {
+                let text = res.text().await.unwrap_or_default();
+                LlmTestResult {
+                    ok: false,
+                    latency_ms,
+                    status: Some(status.as_u16()),
+                    error: Some(text.chars().take(300).collect()),
+                }
+            }
+        }
+        Err(e) => LlmTestResult {
+            ok: false,
+            latency_ms: started.elapsed().as_millis() as u64,
+            status: None,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
+#[cfg(not(feature = "real-engines"))]
+#[tauri::command]
+pub async fn llm_test_connection(
+    endpoint: String,
+    model: String,
+    api_key: Option<String>,
+) -> LlmTestResult {
+    let _ = (endpoint, model, api_key);
+    LlmTestResult {
+        ok: false,
+        latency_ms: 0,
+        status: None,
+        error: Some("real-engines feature not enabled".into()),
+    }
+}
+
 
 #[tauri::command]
 pub async fn dictate_once(style: Style) -> Result<DictateResult, BoothError> {

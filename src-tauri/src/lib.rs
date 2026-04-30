@@ -14,6 +14,7 @@
 //! feature set is `test-fakes` so the inner-loop dev experience stays fast
 //! (no whisper.cpp / llama.cpp compile).
 
+pub mod app_settings;
 pub mod audio;
 pub mod commands;
 pub mod context;
@@ -32,7 +33,8 @@ pub mod tray;
 pub mod vad;
 
 use commands::{
-    dictate_once, microphone_available, open_macos_setting, set_dictation_style, whisper_model_name,
+    app_settings_get, app_settings_save, dictate_once, llm_test_connection, microphone_available,
+    open_macos_setting, set_dictation_style, whisper_model_name,
 };
 #[cfg(feature = "real-engines")]
 use tauri::Manager;
@@ -96,6 +98,9 @@ pub fn run() {
             open_macos_setting,
             microphone_available,
             whisper_model_name,
+            app_settings_get,
+            app_settings_save,
+            llm_test_connection,
         ]);
     }
     #[cfg(not(feature = "real-engines"))]
@@ -106,6 +111,9 @@ pub fn run() {
             open_macos_setting,
             microphone_available,
             whisper_model_name,
+            app_settings_get,
+            app_settings_save,
+            llm_test_connection,
         ]);
     }
     builder

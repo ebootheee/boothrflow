@@ -76,6 +76,31 @@ impl OpenAiCompatLlmCleanup {
         Some(Self::new(endpoint, model, api_key))
     }
 
+    /// Build from on-disk settings if present, falling back to env vars and
+    /// then defaults. Precedence (highest first): saved settings → env →
+    /// `DEFAULT_*`. Returns `None` if the saved settings or env disable LLM.
+    pub fn from_settings_or_env(saved: &crate::app_settings::LlmSettings) -> Option<Result<Self>> {
+        if saved.disabled || std::env::var("BOOTHRFLOW_LLM_DISABLED").is_ok() {
+            return None;
+        }
+        let endpoint = if !saved.endpoint.is_empty() {
+            saved.endpoint.clone()
+        } else {
+            std::env::var("BOOTHRFLOW_LLM_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.into())
+        };
+        let model = if !saved.model.is_empty() {
+            saved.model.clone()
+        } else {
+            std::env::var("BOOTHRFLOW_LLM_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into())
+        };
+        let api_key = if !saved.api_key.is_empty() {
+            Some(saved.api_key.clone())
+        } else {
+            std::env::var("BOOTHRFLOW_LLM_API_KEY").ok()
+        };
+        Some(Self::new(endpoint, model, api_key))
+    }
+
     pub fn endpoint(&self) -> &str {
         &self.endpoint
     }
