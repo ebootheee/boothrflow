@@ -2,21 +2,22 @@
 
 > Where we are and where we're going. The detailed engineering plan lives in [`PLAN.md`](./PLAN.md); this is the user-facing summary.
 
-## Current state — Waves 1–3 landed on `main` (April 2026)
+## Current state — Waves 1–3 + Wave 4a landed on `main` (April 2026)
 
 The core push-to-talk dictation loop works end-to-end on Windows _and_ macOS.
 
 - **Hold to dictate**: `Ctrl + Win` (Windows) or `Ctrl + Cmd` (macOS); release to transcribe + paste.
 - **Tap to toggle (hands-free)**: `Ctrl + Alt + Space` (Windows) or `Ctrl + Option + Space` (macOS); tap once to start, tap again to stop. For dictations longer than you'd want to hold a key.
-- Whisper-tiny-en STT (~75MB local model); **Metal auto-enabled on Apple Silicon** for ~5–15× CPU baseline.
-- Local LLM cleanup via Ollama (qwen2.5:1.5b by default, OpenAI-compat HTTP)
+- Whisper-tiny-en STT (~75MB local model); **Metal auto-enabled on Apple Silicon** for ~5–15× CPU baseline. Initial-prompt vocabulary covers project-specific proper nouns (Qwen, Wispr, boothrflow, Apple Silicon, etc.) so they don't get rendered phonetically.
+- Local LLM cleanup via Ollama (qwen2.5:1.5b by default, OpenAI-compat HTTP). Per-style aggressiveness flag drops disfluencies and self-corrections by default; `Raw` style preserves verbatim. **`tok/s` telemetry** parsed from the Ollama `usage` field shows up in the cleanup chip alongside ms.
+- **Five Style presets** plus the **Captain's Log** easter-egg style — Star-Trek-style log entries with a computed stardate prefix.
+- **Streaming partials with commit-and-roll** — pill keeps updating indefinitely on long dictations (LA2-stable prefix freezes at the 20 s mark, audio buffer trims to a 3 s overlap, suffix-prefix dedup keeps the boundary words clean).
 - Persistent searchable history (SQLite + FTS5 + nomic-embed-text vectors)
 - Quick-paste palette (Alt+Win+H / Option+Cmd+H)
-- Streaming partials in the floating pill (Local-Agreement-2, two-line wrap)
 - macOS first-run permissions panel (Microphone / Accessibility / Input Monitoring)
 - 100% local: no audio or transcripts leave your machine
 
-**What's missing:** structured/app-aware formatting (Phase 2), in-app Settings panel (Phase 2), Linux port, code-signing + notarization, onboarding wizard. See below.
+**What's missing:** in-app Settings panel (Wave 4b — next), Qwen 7B default (gated by Settings), structured/app-aware formatting, OCR window context, auto-learning correction store, Linux port, code-signing + notarization, onboarding wizard. See below.
 
 ### Cross-platform status (post Wave 3 polish)
 
@@ -45,6 +46,8 @@ no-ops elsewhere.
 ## Phase 2 — Intelligence layer (weeks 4–6)
 
 Goal: feels like Wispr Flow.
+
+> **Shipped in Wave 4a (April 2026):** vocabulary expansion in the Whisper initial prompt, per-style aggressiveness flag (mumbling / rambling cleanup), `tok/s` telemetry from the Ollama `usage` field, Captain's Log style, and streaming partial continuation (commit-and-roll). The bullets below for those items are kept as historical detail / spec; they correspond to code that's already on `main`.
 
 - **LLM cleanup pass** — Qwen 2.5 3B running locally via `llama-cpp-2`. Strips fillers, fixes punctuation, handles course-correction ("go to the store, I mean the office" → "go to the office").
 - **Audio-pipeline noise suppression** — preprocess captured audio _before_ VAD/STT to strip background noise (HVAC hum, keyboard clack, household chatter, lossy bluetooth artifacts). Two viable options to evaluate:

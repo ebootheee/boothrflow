@@ -107,20 +107,22 @@ hands-free dictation session, tap again to stop.
 
 ## Status
 
-| Area                                                       | Status                               |
-| ---------------------------------------------------------- | ------------------------------------ |
-| Plan + 13 ADRs                                             | Done                                 |
-| Scaffold + green test suite                                | Done — 22 Rust + 7 FE tests passing  |
-| **P1 W1**: audio + hotkey + pill                           | Done                                 |
-| **P1 W2**: VAD + Whisper STT                               | Done — needs ggml-tiny.en.bin        |
-| **P1 W3**: paste injection + tray                          | Done                                 |
-| **P2 W4**: LLM cleanup (OpenAI-compat HTTP) + style picker | Done — needs Ollama or compat server |
-| **P2 W5**: app-context detection                           | Next                                 |
-| Memory / history                                           | Done                                 |
-| **Wave 3**: macOS port                                     | Done — merged to `main`              |
-| **Phase 2 backlog**: structured/app-aware formatting       | Roadmapped (see ROADMAP.md)          |
-| **Phase 2 backlog**: in-app Settings panel                 | Roadmapped (see ROADMAP.md)          |
-| Linux                                                      | Phase 4                              |
+| Area                                                                  | Status                               |
+| --------------------------------------------------------------------- | ------------------------------------ |
+| Plan + 14 ADRs                                                        | Done                                 |
+| Scaffold + green test suite                                           | Done — 42 Rust + 7 FE tests passing  |
+| **P1 W1**: audio + hotkey + pill                                      | Done                                 |
+| **P1 W2**: VAD + Whisper STT                                          | Done — needs ggml-tiny.en.bin        |
+| **P1 W3**: paste injection + tray                                     | Done                                 |
+| **P2 W4**: LLM cleanup (OpenAI-compat HTTP) + style picker            | Done — needs Ollama or compat server |
+| **Wave 3**: macOS port                                                | Done                                 |
+| **Wave 4a**: cleanup quality + tok/s + streaming roll + Captain's Log | Done                                 |
+| Memory / history                                                      | Done                                 |
+| **Wave 4b**: in-app Settings panel + Qwen 7B default                  | Next                                 |
+| **P2 W5**: app-context detection                                      | Roadmapped                           |
+| **Phase 2 backlog**: OCR window context + auto-learning corrections   | Roadmapped (see ROADMAP.md)          |
+| **Phase 2 backlog**: structured/app-aware formatting                  | Roadmapped (see ROADMAP.md)          |
+| Linux                                                                 | Phase 4                              |
 
 ## Documentation
 
