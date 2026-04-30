@@ -36,6 +36,7 @@ use commands::{
 };
 #[cfg(feature = "real-engines")]
 use tauri::Manager;
+use tauri::WindowEvent;
 
 #[cfg(feature = "real-engines")]
 use commands::{
@@ -78,7 +79,23 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_store::Builder::default().build());
+        .plugin(tauri_plugin_store::Builder::default().build())
+        // Intercept the red-X close on the main window: hide instead of
+        // destroying. Without this, X-clicking would `close()` the window
+        // and Tauri would drop it; subsequent `app.get_webview_window("main")`
+        // calls (from the tray's "Open Settings" handler and tray-icon
+        // click) return None, so the user sees the icon but can't bring
+        // the app back. Hiding leaves the WebviewWindow alive so Show()
+        // works. Other windows (pill, quick-paste) keep their default
+        // behavior — they're managed by their own visibility code paths.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        });
 
     #[cfg(feature = "real-engines")]
     {

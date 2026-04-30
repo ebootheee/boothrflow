@@ -39,18 +39,37 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
         .ok_or_else(|| BoothError::internal("no default window icon"))?
         .clone();
 
-    TrayIconBuilder::with_id("boothrflow-tray")
+    let mut tray_builder = TrayIconBuilder::with_id("boothrflow-tray")
         .icon(icon)
         .tooltip(format!(
             "boothrflow — idle ({} to dictate)",
             dictation_hotkey_label()
         ))
-        .menu(&menu)
+        .menu(&menu);
+
+    // macOS-only: mark the icon as a template so AppKit renders it in
+    // black/white that adapts to the menu-bar's appearance (and to dark
+    // mode). Without this, our colored .png icon can be invisible on a
+    // dark menu bar — which looked like "the tray icon never showed up"
+    // in Wave 4a UAT. The full-color icon is still used in the dock.
+    #[cfg(target_os = "macos")]
+    {
+        tray_builder = tray_builder.icon_as_template(true);
+    }
+
+    tray_builder
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "open" => {
                 if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
+                } else {
+                    // Defensive: if the main window was destroyed (shouldn't
+                    // happen now that the close-requested handler hides
+                    // instead, but Tauri can still close on system shutdown
+                    // signals), warn so we can debug.
+                    tracing::warn!("tray Open: main window not found");
                 }
             }
             "pause" => {
@@ -81,6 +100,7 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
             } = event
             {
                 if let Some(window) = tray.app_handle().get_webview_window("main") {
+                    let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
