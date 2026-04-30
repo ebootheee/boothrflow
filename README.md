@@ -31,7 +31,8 @@ pnpm install
 pnpm download:model:mac   # Whisper tiny.en, ~75MB. For better quality:
                           #   pnpm download:model:mac small  (≈466MB)
                           # then `export BOOTHRFLOW_WHISPER_MODEL_FILE=ggml-small.en.bin`
-pnpm ollama:pull          # qwen2.5:1.5b + nomic-embed-text
+pnpm ollama:pull          # qwen2.5:7b (default) + qwen2.5:1.5b (fallback) + nomic-embed-text
+                          # `pnpm ollama:pull:fast` skips the 7B if disk is tight
 
 # 4. Boot
 pnpm dev
@@ -92,7 +93,8 @@ pnpm install
 pnpm download:model
 
 # 4. (Optional) Set up the LLM cleanup pass via Ollama
-ollama pull qwen2.5:1.5b      # ~1GB, lives in your Ollama install
+ollama pull qwen2.5:7b        # ~5GB, the default cleanup model
+ollama pull qwen2.5:1.5b      # ~1GB, optional fallback for slow boxes
 
 # 5. Boot
 pnpm dev:msvc
@@ -109,7 +111,7 @@ hands-free dictation session, tap again to stop.
 
 | Area                                                                  | Status                               |
 | --------------------------------------------------------------------- | ------------------------------------ |
-| Plan + 14 ADRs                                                        | Done                                 |
+| Plan + 15 ADRs                                                        | Done                                 |
 | Scaffold + green test suite                                           | Done — 42 Rust + 7 FE tests passing  |
 | **P1 W1**: audio + hotkey + pill                                      | Done                                 |
 | **P1 W2**: VAD + Whisper STT                                          | Done — needs ggml-tiny.en.bin        |
@@ -118,7 +120,8 @@ hands-free dictation session, tap again to stop.
 | **Wave 3**: macOS port                                                | Done                                 |
 | **Wave 4a**: cleanup quality + tok/s + streaming roll + Captain's Log | Done                                 |
 | Memory / history                                                      | Done                                 |
-| **Wave 4b**: in-app Settings panel + Qwen 7B default                  | Next                                 |
+| **LLM default**: Qwen 2.5 7B (1.5B fallback via env var)              | Done — needs `pnpm ollama:pull`      |
+| **Wave 4b**: in-app Settings panel                                    | Next                                 |
 | **P2 W5**: app-context detection                                      | Roadmapped                           |
 | **Phase 2 backlog**: OCR window context + auto-learning corrections   | Roadmapped (see ROADMAP.md)          |
 | **Phase 2 backlog**: structured/app-aware formatting                  | Roadmapped (see ROADMAP.md)          |
@@ -128,7 +131,7 @@ hands-free dictation session, tap again to stop.
 
 - [`ROADMAP.md`](./ROADMAP.md) — what's coming, when
 - [`PLAN.md`](./PLAN.md) — full engineering plan with feature parity matrix vs Wispr Flow, latency budget, repo layout, risk register
-- [`DECISIONS.md`](./DECISIONS.md) — Architecture Decision Records (14 entries)
+- [`DECISIONS.md`](./DECISIONS.md) — Architecture Decision Records (15 entries)
 - [`docs/uat/`](./docs/uat/) — phase-by-phase UAT reports, including manual test plans
 
 ## Architecture (mental model)
@@ -223,25 +226,26 @@ See [ADR-006](./DECISIONS.md#adr-006--workflow-conventional-commits-small-prs-no
 
 ## LLM cleanup pass
 
-The transcript is run through a small LLM (Qwen 2.5 1.5B by default) for
-punctuation, capitalization, and run-on-sentence splitting. We talk to it
-over the **OpenAI-compatible chat-completions API** so it can be backed by
+The transcript is run through a small LLM (Qwen 2.5 7B by default) for
+punctuation, capitalization, run-on-sentence splitting, disfluency
+removal, and contextual word correction. We talk to it over the
+**OpenAI-compatible chat-completions API** so it can be backed by
 whatever you already have running:
 
-| Backend                    | Endpoint                                     | Notes                                                              |
-| -------------------------- | -------------------------------------------- | ------------------------------------------------------------------ |
-| **Ollama** (default)       | `http://localhost:11434/v1/chat/completions` | `ollama pull qwen2.5:1.5b` and you're done. GPU offload automatic. |
-| `llama-server` (llama.cpp) | `http://localhost:8080/v1/chat/completions`  | Set `BOOTHRFLOW_LLM_ENDPOINT`                                      |
-| LM Studio                  | `http://localhost:1234/v1/chat/completions`  | same                                                               |
-| OpenAI / Anthropic / Groq  | their cloud URL                              | set `BOOTHRFLOW_LLM_API_KEY` (BYOK)                                |
+| Backend                    | Endpoint                                     | Notes                                                                                                   |
+| -------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Ollama** (default)       | `http://localhost:11434/v1/chat/completions` | `ollama pull qwen2.5:7b` and you're done. GPU offload automatic. ~350-400 ms per dictation on M-series. |
+| `llama-server` (llama.cpp) | `http://localhost:8080/v1/chat/completions`  | Set `BOOTHRFLOW_LLM_ENDPOINT`                                                                           |
+| LM Studio                  | `http://localhost:1234/v1/chat/completions`  | same                                                                                                    |
+| OpenAI / Anthropic / Groq  | their cloud URL                              | set `BOOTHRFLOW_LLM_API_KEY` (BYOK)                                                                     |
 
 Override defaults with environment variables:
 
 ```
 BOOTHRFLOW_LLM_ENDPOINT=http://localhost:11434/v1/chat/completions
-BOOTHRFLOW_LLM_MODEL=qwen2.5:1.5b
-BOOTHRFLOW_LLM_API_KEY=...                  # only for cloud
-BOOTHRFLOW_LLM_DISABLED=1                   # skip cleanup entirely
+BOOTHRFLOW_LLM_MODEL=qwen2.5:7b              # or qwen2.5:1.5b on slow boxes
+BOOTHRFLOW_LLM_API_KEY=...                   # only for cloud
+BOOTHRFLOW_LLM_DISABLED=1                    # skip cleanup entirely
 ```
 
 If the LLM server is down or the model isn't loaded, the pipeline falls

@@ -16,7 +16,9 @@
 //! - `BOOTHRFLOW_LLM_ENDPOINT` — full URL to the chat-completions endpoint.
 //!   Default: `http://localhost:11434/v1/chat/completions`
 //! - `BOOTHRFLOW_LLM_MODEL` — model name as the endpoint expects it.
-//!   Default: `qwen2.5:1.5b` (works with `ollama pull qwen2.5:1.5b`).
+//!   Default: `qwen2.5:7b` (works with `ollama pull qwen2.5:7b`). Set to
+//!   `qwen2.5:1.5b` to fall back to the smaller / faster model on slower
+//!   machines; that's the path until the in-app Settings panel ships.
 //! - `BOOTHRFLOW_LLM_API_KEY` — optional bearer token. Required for cloud
 //!   providers (OpenAI, Anthropic, Groq); not needed for local Ollama.
 //! - `BOOTHRFLOW_LLM_DISABLED=1` — skip LLM cleanup entirely; equivalent
@@ -39,7 +41,7 @@ use crate::llm::{stardate_label, CleanupOutput, CleanupRequest, LlmCleanup};
 use crate::settings::Style;
 
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:11434/v1/chat/completions";
-pub const DEFAULT_MODEL: &str = "qwen2.5:1.5b";
+pub const DEFAULT_MODEL: &str = "qwen2.5:7b";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct OpenAiCompatLlmCleanup {

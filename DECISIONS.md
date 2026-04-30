@@ -346,6 +346,30 @@ The fakes-only inner loop (`pnpm test:rust`, `pnpm test:fe`) still works in any 
 
 ---
 
+## ADR-015 — Cleanup LLM default: Qwen 2.5 7B (with 1.5B as a fallback knob)
+
+**Status:** Accepted, 2026-04-29. Refines the implementation choice made at ADR-011 (which targeted Qwen 2.5 3B in-process via `llama-cpp-2`) and the OpenAI-compat HTTP pivot in commit `ca00e48` (which shipped with Qwen 2.5 1.5B as the default model).
+
+**Context.** Wave 3 UAT showed the 1.5B model running clean cleanup in 150–300 ms but with borderline quality — it preserved mumbling-grade disfluencies even after the cleanup-aggressiveness flag landed in Wave 4a, and it occasionally botched proper nouns even when the Whisper initial-prompt vocabulary was extended. The user's direct feedback after dictating the Phase 2 backlog: "the 7 billion parameter model for Qwen is a little bit better… but the latency is quite a bit longer, maybe double. But for cleanup, having 350-400 milliseconds is no big deal."
+
+7B inference on Apple Silicon Metal is well below the "feels instant" cleanup threshold because the user has already finished speaking and is watching the paste land — perceived latency is the paste, not the cleanup pass.
+
+**Decision.**
+
+- `DEFAULT_MODEL` in `src-tauri/src/llm/openai_compat.rs` flips from `qwen2.5:1.5b` to **`qwen2.5:7b`**.
+- `pnpm ollama:pull` now pulls both 7B and 1.5B (plus `nomic-embed-text` for history embeddings) so users can swap without a re-pull. `pnpm ollama:pull:fast` skips the 7B for tight-disk machines.
+- The escape hatch is `BOOTHRFLOW_LLM_MODEL=qwen2.5:1.5b` until the in-app Settings panel (Wave 4b) exposes a UI picker and persists the choice via `tauri-plugin-store`.
+
+**Consequences.**
+
+- ~5 GB extra model on disk by default. Acceptable given the user has explicitly asked for the upgrade and Ollama can free unused models on demand.
+- ~2-3× cleanup latency (300 ms → 350-400 ms). Stays comfortably below the perceived-latency threshold; tok/s telemetry on the cleanup chip lets users diagnose if their machine is slower.
+- Slower boxes (Intel Mac, low-VRAM Linux) can drop back to 1.5B via env var. Until Settings ships, this is a manual flip.
+
+**Reverses?** Not strictly. ADR-011 was about an in-process llama-cpp-2 path that didn't ship (we pivoted to HTTP). ADR-015 stacks on top of the HTTP pivot.
+
+---
+
 ## How to add a new ADR
 
 1. Append below the last one with the next number.

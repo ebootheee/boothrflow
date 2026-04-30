@@ -9,7 +9,7 @@ The core push-to-talk dictation loop works end-to-end on Windows _and_ macOS.
 - **Hold to dictate**: `Ctrl + Win` (Windows) or `Ctrl + Cmd` (macOS); release to transcribe + paste.
 - **Tap to toggle (hands-free)**: `Ctrl + Alt + Space` (Windows) or `Ctrl + Option + Space` (macOS); tap once to start, tap again to stop. For dictations longer than you'd want to hold a key.
 - Whisper-tiny-en STT (~75MB local model); **Metal auto-enabled on Apple Silicon** for ~5–15× CPU baseline. Initial-prompt vocabulary covers project-specific proper nouns (Qwen, Wispr, boothrflow, Apple Silicon, etc.) so they don't get rendered phonetically.
-- Local LLM cleanup via Ollama (qwen2.5:1.5b by default, OpenAI-compat HTTP). Per-style aggressiveness flag drops disfluencies and self-corrections by default; `Raw` style preserves verbatim. **`tok/s` telemetry** parsed from the Ollama `usage` field shows up in the cleanup chip alongside ms.
+- Local LLM cleanup via Ollama (**qwen2.5:7b** by default, fallback to qwen2.5:1.5b via `BOOTHRFLOW_LLM_MODEL`, OpenAI-compat HTTP). Per-style aggressiveness flag drops disfluencies and self-corrections by default; `Raw` style preserves verbatim. **`tok/s` telemetry** parsed from the Ollama `usage` field shows up in the cleanup chip alongside ms.
 - **Five Style presets** plus the **Captain's Log** easter-egg style — Star-Trek-style log entries with a computed stardate prefix.
 - **Streaming partials with commit-and-roll** — pill keeps updating indefinitely on long dictations (LA2-stable prefix freezes at the 20 s mark, audio buffer trims to a 3 s overlap, suffix-prefix dedup keeps the boundary words clean).
 - Persistent searchable history (SQLite + FTS5 + nomic-embed-text vectors)
@@ -58,7 +58,7 @@ Goal: feels like Wispr Flow.
 
 - **Cleanup quality refinements** _(near-term, prompted by Wave 3 dictation UAT)_ — observed gaps from Eric's hands-free dictation pass:
   - **Mumbling / rambling removal.** Filler phrases ("you know", "I mean", "uh", "kind of"), false starts, restarts, and tangential half-sentences should be cleaned up by default in non-Raw styles. Today's prompt asks the model to preserve words exactly. Need a graded mode: keep the meaning, drop the disfluency. Plumbing: a per-style `aggressiveness` flag in the system prompt (0 = preserve verbatim, 1 = drop fillers, 2 = light paraphrase). Casual default = 1.
-  - **Bump default to Qwen 2.5 7B.** Wave 3 UAT showed 1.5B is fast (~150-300ms typical) but borderline on quality. 7B costs ~350-400ms which is below the "feels instant" threshold for cleanup (the user has already finished speaking and is watching the paste land). Move `DEFAULT_MODEL` from `qwen2.5:1.5b` to `qwen2.5:7b` once the in-app Settings panel ships so users can drop back to 1.5B if their LLM box is slow. Document as a Reverse-ADR-014 follow-up if we commit.
+  - ✅ **Bumped default to Qwen 2.5 7B** (April 2026). Wave 3 UAT showed 1.5B is fast (~150-300ms typical) but borderline on quality. 7B costs ~350-400ms which is below the "feels instant" threshold for cleanup. Documented as ADR-015. Users on slower boxes drop back via `BOOTHRFLOW_LLM_MODEL=qwen2.5:1.5b` until the in-app Settings panel ships and exposes a UI picker.
   - **Vocabulary expansion.** The Whisper `initial_prompt` doesn't currently list "Qwen" (or "Wispr", "Tauri-Specta", "boothrflow", "MTLDevice"…). Misses on those words ride through to the LLM, which can't always recover. Action: append a curated tech-vocab chunk to `DEFAULT_INITIAL_PROMPT` and let the (future) Personal Dictionary append user-specific terms on top.
   - **Spelled-out word detection** — when the user spells a name or technical term mid-sentence ("my last name is Boothe, B-O-O-T-H-E", "the project is called Q-W-E-N as in queen with a W"), the STT often produces a sequence of letter-tokens that the LLM doesn't know to treat as authoritative. Plumbing: a pre-cleanup pass that scans the raw transcript for spelling patterns —
     - Hyphen-joined uppercase runs: `B-O-O-T-H-E`, `Q-W-E-N`
@@ -164,6 +164,6 @@ Goal: continuous-recording meetings produce transcript + summary as markdown aut
 
 ## How feature decisions get made
 
-Every architecturally-significant choice goes through an ADR ([`DECISIONS.md`](./DECISIONS.md), 14 entries so far). UATs after each phase ([`docs/uat/`](./docs/uat/)) capture what shipped, what got deferred, and why.
+Every architecturally-significant choice goes through an ADR ([`DECISIONS.md`](./DECISIONS.md), 15 entries so far). UATs after each phase ([`docs/uat/`](./docs/uat/)) capture what shipped, what got deferred, and why.
 
 If you want a specific feature, open an issue with the use case. Concrete user friction beats theoretical architecture in our prioritization.
