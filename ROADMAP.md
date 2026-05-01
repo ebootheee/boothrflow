@@ -18,7 +18,7 @@ The core push-to-talk dictation loop works end-to-end on Windows _and_ macOS.
 - macOS first-run permissions panel (Microphone / Accessibility / Input Monitoring)
 - 100% local: no audio or transcripts leave your machine
 
-**What's missing:** Wave 4b polish (Test-connection button, preset chips, autostart toggle, About section, Permissions-in-Settings, equal-width grid, API keys → macOS Keychain, full tauri-specta TS-binding generation), structured/app-aware formatting, OCR window context, auto-learning correction store, Linux port, code-signing + notarization, onboarding wizard. See below.
+**What's missing:** `tauri-specta` full TS-binding generation (the remaining Wave 4b polish item, deferred for its own session), structured/app-aware formatting, OCR window context, auto-learning correction store, Linux port, code-signing + notarization, onboarding wizard. See below.
 
 ### Cross-platform status (post Wave 3 polish)
 
@@ -91,16 +91,16 @@ Goal: feels like Wispr Flow.
 - **Structured formatting (app-aware)** — beyond punctuation. Wispr Flow's superpower is that long dictations come back as actual _structure_: bullet lists when you spoke a list, paragraph breaks when you paused, a greeting + signature in Mail, code fenced when you said "in code". Plumbing: extend the cleanup prompt with a structure-detection pass keyed on app context (Mail / Slack / Notion / IDE / generic) plus heuristics on the raw transcript ("first… second… third" → numbered list; >25s of speech → paragraph splits at sentence-boundary pause markers). Surfaces as a sixth Style ("Auto-format") that overrides tone-only styles when the model has high confidence; falls back to plain casual cleanup otherwise.
 - ✅ **In-app Settings panel** — shipped in Wave 4B (`509e7a7`). Whisper / LLM / embed pickers (with parameter counts in dropdown labels), hotkey rebind UI, vocabulary editor, privacy toggle, settings export/import, persisted via `tauri-plugin-store`. See `docs/waves/wave-4b-settings-panel.md`.
 
-- **Wave 4b polish (deferred + incoming)** — items the Wave 4B cut explicitly skipped, plus polish ideas from the parallel PRs (#2 / #3, closed pending rebase against new `main`):
-  - **API keys → macOS Keychain** — currently stored in the app settings store. Move to OS keychain via `keyring-rs` so secrets aren't sitting in plaintext JSON next to the user's data dir. Falls back to the encrypted `tauri-plugin-store` backend on platforms where keychain is unavailable.
-  - **Full `tauri-specta` TS-binding generation** — currently the FE manually mirrors Rust struct shapes. ADR-007 work, finally has the right scale of typed commands (~20 across Wave 4B) to be worth wiring. Eliminates one of the most common bug surfaces.
-  - **"Test connection" button on the LLM section** — 1-token request that reports latency or error. From PR #2.
-  - **Preset chips for common LLM endpoints** — Ollama / llama.cpp / LM Studio / OpenRouter quick-select, fills endpoint + suggests model. From PR #2.
-  - **Autostart toggle** via `tauri-plugin-autostart`. From PR #2.
-  - **"About" section** with version / repo / license / model-data-dir links. From PR #2.
-  - **Sidebar nav across Settings sections** vs the current single scrollable modal — UX choice; the sidebar is generally cleaner for >3 sections. From PR #2.
-  - **Move Permissions into Settings → General** — retire the topbar Permissions button. The dismissable mic-blocked notice on the dashboard stays (critical state shouldn't hide behind a click). From PR #3.
-  - **Equal-width workspace grid** — `.workspace-grid` from `minmax(0, 1fr) 360px` to `minmax(0, 1fr) minmax(0, 1fr)` for the Transcript / Pipeline columns. From PR #3.
+- **Wave 4b polish (mostly shipped April 2026)** — items that landed across `e42da2e` and `47b0eac`, with the Specta wiring still queued as the remaining structural piece:
+  - ✅ **API keys → macOS Keychain** — `keyring` 3.x with apple-native, windows-native, sync-secret-service backends. Three-state availability probe (`Unknown` / `Available` / `Unavailable`), automatic migrate-on-save from prior plaintext-JSON stores. Falls back gracefully on platforms without a backend.
+  - **Full `tauri-specta` TS-binding generation** — the remaining queued piece. Currently the FE manually mirrors Rust struct shapes. ADR-007 work, finally has the right scale (~20 typed commands) to be worth wiring. Eliminates the most common drift surface. Deferred to its own session because it touches every `#[tauri::command]` + the FE binding layer.
+  - ✅ **"Test connection" button on the LLM section** — `llm_test_connection` Tauri command sends a 1-token cleanup probe; renders inline OK / Failed + latency in ms.
+  - ✅ **Preset chips for common LLM endpoints** — Ollama / llama.cpp / LM Studio / OpenAI / OpenRouter. Selecting fills `endpoint` and suggests a matching `model` (preserves edits afterward).
+  - ✅ **Autostart toggle** — `tauri-plugin-autostart` initialized in `lib.rs`; FE calls the plugin module directly. Lives in Settings → General → "Launch at login".
+  - ✅ **About section** — app version (via `app_version` command reading `CARGO_PKG_VERSION`), repo link, license. Settings export/import moved here.
+  - ✅ **Sidebar nav across Settings sections** — five-section layout (General · LLM · Whisper · History · About). `activeSettingsSection` persists across opens.
+  - ✅ **Move Permissions into Settings → General** — topbar Permissions button retired. Card lives under General on macOS only. Dismissable mic-blocked dashboard notice still surfaces above the fold.
+  - ✅ **Equal-width workspace grid** — `.workspace-grid` from `minmax(0, 1fr) 360px` to `minmax(0, 1fr) minmax(0, 1fr)`.
 - **Personal dictionary** — manual add + auto-learn from your post-edits. Hot-word boost via Whisper's `initial_prompt` trick.
 - **Skip-LLM hotkey** — explicit "raw mode" for code dictation.
 
