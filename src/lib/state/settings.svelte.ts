@@ -52,6 +52,8 @@ const defaultSettings: AppSettings = {
   },
   vocabulary: "",
   per_app_styles: [],
+  commonly_misheard: [],
+  cleanup_window_ocr: false,
 };
 
 const defaultOptions: SettingsOptions = {
@@ -142,6 +144,8 @@ function applyPatch(current: AppSettings, patch: SettingsPatch): AppSettings {
     hotkeys: patch.hotkeys ?? current.hotkeys,
     vocabulary: patch.vocabulary ?? current.vocabulary,
     per_app_styles: patch.per_app_styles ?? current.per_app_styles,
+    commonly_misheard: patch.commonly_misheard ?? current.commonly_misheard ?? [],
+    cleanup_window_ocr: patch.cleanup_window_ocr ?? current.cleanup_window_ocr ?? false,
   };
 }
 

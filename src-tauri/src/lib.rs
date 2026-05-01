@@ -22,6 +22,7 @@ pub mod history;
 pub mod hotkey;
 pub mod injector;
 pub mod llm;
+pub mod ocr;
 pub mod overlay;
 pub mod pipeline;
 pub mod quickpaste;

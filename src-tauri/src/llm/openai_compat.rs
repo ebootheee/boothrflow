@@ -37,8 +37,9 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{BoothError, Result};
-use crate::llm::{stardate_label, CleanupOutput, CleanupRequest, LlmCleanup};
-use crate::settings::{LlmSettings, Style};
+use crate::llm::prompt::{build_system_prompt, CleanupPromptInputs};
+use crate::llm::{CleanupOutput, CleanupRequest, LlmCleanup};
+use crate::settings::LlmSettings;
 
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:11434/v1/chat/completions";
 pub const DEFAULT_MODEL: &str = "qwen2.5:7b";
@@ -101,6 +102,30 @@ impl OpenAiCompatLlmCleanup {
         &self.model
     }
 
+    /// Heuristic: is the configured endpoint Ollama? Used to gate the
+    /// `keep_alive` extra field — Ollama uses it to keep weights resident
+    /// in VRAM across requests; cloud BYOK endpoints (OpenAI, Anthropic,
+    /// Groq) generally ignore unknown fields but some strict gateways
+    /// (LM Studio in particular) return 400 on unknown keys, so we only
+    /// send `keep_alive` to endpoints that are clearly Ollama.
+    ///
+    /// Detection is conservative on purpose: we'd rather miss the
+    /// VRAM-warming optimization for a non-default Ollama install than
+    /// break LM Studio / llama-server / vLLM users with an unknown-field
+    /// rejection. A future settings toggle can let advanced users opt
+    /// in explicitly.
+    fn looks_like_ollama(&self) -> bool {
+        let lower = self.endpoint.to_lowercase();
+        // Default Ollama port — covers the 99% case and our shipped
+        // default endpoint. Bare `localhost` is too broad (matches LM
+        // Studio :1234, llama-server :8080) so we don't include it.
+        lower.contains(":11434")
+    }
+
+    fn keep_alive_for_endpoint(&self) -> &'static str {
+        if self.looks_like_ollama() { "5m" } else { "" }
+    }
+
     /// Send a tiny dummy request so the backend loads the model into VRAM
     /// before the user's first dictation. Failures are silently logged —
     /// the daemon will still try the real call when the user dictates.
@@ -119,6 +144,7 @@ impl OpenAiCompatLlmCleanup {
             ],
             temperature: 0.0,
             stream: false,
+            keep_alive: self.keep_alive_for_endpoint(),
         };
         let started = Instant::now();
         let mut req = self.client.post(&self.endpoint).json(&body);
@@ -145,6 +171,16 @@ struct ChatRequest<'a> {
     messages: [ChatMessage<'a>; 2],
     temperature: f32,
     stream: bool,
+    /// Ollama-specific extra: how long to keep the model resident in
+    /// VRAM after the request completes. The OpenAI-compat layer
+    /// ignores fields it doesn't recognize, so this is harmless on
+    /// non-Ollama backends. 5 minutes covers typical inter-dictation
+    /// gaps so the KV cache + model weights stay warm — this is the
+    /// "prompt prefix caching" win because Ollama can re-use the KV
+    /// state for the stable system-prompt prefix across consecutive
+    /// dictations within the keep_alive window.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    keep_alive: &'a str,
 }
 
 #[derive(Serialize)]
@@ -184,7 +220,14 @@ struct Usage {
 impl LlmCleanup for OpenAiCompatLlmCleanup {
     fn cleanup(&self, request: CleanupRequest<'_>) -> Result<CleanupOutput> {
         let started = Instant::now();
-        let system = build_system_prompt(&request.style);
+        let inputs = CleanupPromptInputs {
+            style: request.style,
+            app_context: request.app_context.as_ref(),
+            window_ocr: request.window_ocr.as_deref(),
+            preferred_transcriptions: &request.preferred_transcriptions,
+            commonly_misheard: &request.commonly_misheard,
+        };
+        let system = build_system_prompt(&inputs);
 
         let body = ChatRequest {
             model: &self.model,
@@ -200,6 +243,7 @@ impl LlmCleanup for OpenAiCompatLlmCleanup {
             ],
             temperature: 0.0,
             stream: false,
+            keep_alive: self.keep_alive_for_endpoint(),
         };
 
         let mut req = self.client.post(&self.endpoint).json(&body);
@@ -268,63 +312,56 @@ impl LlmCleanup for OpenAiCompatLlmCleanup {
     }
 }
 
-fn build_system_prompt(style: &Style) -> String {
-    // Captain's Log gets its own bespoke prompt rather than retrofitting the
-    // generic template — the canon-style rewrite is structurally different
-    // (preserves meaning, transforms tone heavily) so a single set of rules
-    // doesn't fit cleanly. We still constrain it tightly to avoid invented
-    // ship names / characters / numeric stardate prefixes.
-    if matches!(style, Style::CaptainsLog) {
-        let stardate = stardate_label();
-        return format!(
-            "You are a post-processor for voice dictation, rewriting the speaker's words as a \
-             Star-Trek-style Captain's Log entry.\n\
-             \n\
-             Rules:\n\
-             - BEGIN your output with exactly this sentence: \"Captain's log, stardate {stardate}.\"\n\
-             - END your output with exactly this sentence: \"End log.\"\n\
-             - Between those, rewrite the speaker's content in formal, slightly archaic 24th-century \
-               space-faring tone. Phrases like \"set course for\", \"we have detected\", \"the crew is \
-               investigating\", \"long-range sensors indicate\", \"I have ordered\" are encouraged where \
-               they fit.\n\
-             - DO preserve all factual content the speaker said. The log should describe what they \
-               actually said, not invent a sci-fi adventure.\n\
-             - DO NOT invent ship names, crew names, characters from canon (Picard, Spock, Enterprise, \
-               Federation, etc.), or any specific numeric details that weren't in the input.\n\
-             - DO NOT add a stardate prefix anywhere except the opening sentence specified above.\n\
-             - Drop disfluencies (\"uh\", \"um\", \"you know\") and false starts. Keep the meaning.\n\
-             - Output ONLY the log entry. No preamble, no quotes around the output."
-        );
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn client(endpoint: &str) -> OpenAiCompatLlmCleanup {
+        OpenAiCompatLlmCleanup::new(endpoint.into(), "test-model".into(), None).unwrap()
     }
 
-    let aggressiveness = style.aggressiveness();
-    let aggressiveness_instr = match aggressiveness {
-        0 => "Preserve every word the speaker said exactly. Do not drop fillers, do not paraphrase.",
-        1 => "Drop disfluencies (\"uh\", \"um\", \"you know\", \"I mean\", \"like\" used as filler), false starts, and self-corrections — when the speaker says \"go to the store, I mean the office\", output \"go to the office\". Do not paraphrase or shorten otherwise. Keep all substantive content.",
-        _ => "Drop disfluencies, false starts, and self-corrections. Light paraphrasing is allowed where it preserves the speaker's meaning and intent. Do not invent or add information.",
-    };
+    #[test]
+    fn ollama_default_endpoint_gets_keep_alive() {
+        let c = client(DEFAULT_ENDPOINT);
+        assert!(c.looks_like_ollama());
+        assert_eq!(c.keep_alive_for_endpoint(), "5m");
+    }
 
-    let style_instr = match style {
-        Style::Raw => "",
-        Style::Formal => "\nStyle: formal — full sentences with proper punctuation, no slang, no contractions where avoidable.",
-        Style::Casual => "\nStyle: casual — keep contractions, conversational tone.",
-        Style::Excited => "\nStyle: excited — exclamation marks where natural, energetic tone.",
-        Style::VeryCasual => "\nStyle: very casual — lowercase first letters, minimal punctuation.",
-        // Captain's Log handled in the early-return above.
-        Style::CaptainsLog => unreachable!(),
-    };
+    #[test]
+    fn lm_studio_default_port_does_not_get_keep_alive() {
+        // LM Studio runs on localhost:1234 by default and rejects the
+        // `keep_alive` extra in some versions. The heuristic narrows
+        // to port 11434 specifically so LM Studio users aren't broken.
+        let c = client("http://localhost:1234/v1/chat/completions");
+        assert!(!c.looks_like_ollama());
+        assert_eq!(c.keep_alive_for_endpoint(), "");
+    }
 
-    format!(
-        "You are a post-processor for voice dictation. Your job is to add proper punctuation \
-         and capitalization to a raw spoken transcript and reshape it per the rules below.\n\
-         \n\
-         Rules:\n\
-         - Add periods, commas, question marks, exclamation marks where natural.\n\
-         - Capitalize the first word of each sentence and proper nouns.\n\
-         - Split run-on sentences into separate sentences.\n\
-         - {aggressiveness_instr}\n\
-         - If a transcribed word is acoustically plausible but semantically nonsensical given the surrounding context, replace it with the most likely intended word. Do not over-correct content that simply seems unusual.\n\
-         - Output ONLY the cleaned text. No preamble, no explanation, no quotes around the output.\
-         {style_instr}"
-    )
+    #[test]
+    fn llama_server_default_port_does_not_get_keep_alive() {
+        // llama-server (llama.cpp) defaults to localhost:8080.
+        let c = client("http://localhost:8080/v1/chat/completions");
+        assert!(!c.looks_like_ollama());
+    }
+
+    #[test]
+    fn ollama_alt_port_misses_optimization_acceptably() {
+        // Trade-off: a user running Ollama on a non-default port misses
+        // the VRAM-warming bonus. Worth it to avoid breaking LM Studio.
+        let c = client("http://localhost:9999/v1/chat/completions");
+        assert!(!c.looks_like_ollama());
+    }
+
+    #[test]
+    fn openai_endpoint_skips_keep_alive() {
+        let c = client("https://api.openai.com/v1/chat/completions");
+        assert!(!c.looks_like_ollama());
+        assert_eq!(c.keep_alive_for_endpoint(), "");
+    }
+
+    #[test]
+    fn anthropic_endpoint_skips_keep_alive() {
+        let c = client("https://api.anthropic.com/v1/messages");
+        assert!(!c.looks_like_ollama());
+    }
 }

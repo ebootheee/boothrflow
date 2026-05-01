@@ -874,6 +874,18 @@ kbd {
   gap: 6px;
 }
 
+.correction-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.correction-arrow {
+  color: var(--ink-quiet);
+  font-size: 13px;
+}
+
 .compact-empty {
   min-height: 58px;
 }

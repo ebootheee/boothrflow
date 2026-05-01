@@ -87,7 +87,7 @@ mod tests {
             .cleanup(CleanupRequest {
                 raw_text: "uh so basically this works, you know, like always",
                 style: Style::Raw,
-                app_context: None,
+                ..Default::default()
             })
             .unwrap();
         assert!(!out.text.contains("uh"));
@@ -106,7 +106,7 @@ mod tests {
             .cleanup(CleanupRequest {
                 raw_text: "ship it",
                 style: Style::Formal,
-                app_context: None,
+                ..Default::default()
             })
             .unwrap();
         assert!(out.text.ends_with('.'));
@@ -120,7 +120,7 @@ mod tests {
             .cleanup(CleanupRequest {
                 raw_text: "we're approaching the asteroid field",
                 style: Style::CaptainsLog,
-                app_context: None,
+                ..Default::default()
             })
             .unwrap();
         assert!(out.text.starts_with("Captain's log, stardate "));

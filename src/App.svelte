@@ -267,7 +267,7 @@
 
   const whisperModel = $derived(settings.current.whisper.model);
 
-  type PermissionPane = "microphone" | "accessibility" | "input_monitoring";
+  type PermissionPane = "microphone" | "accessibility" | "input_monitoring" | "screen_recording";
   async function openPermissionPane(pane: PermissionPane) {
     if (!inDesktop) return;
     try {
@@ -292,6 +292,25 @@
 
   function updateLlm(patch: Partial<LlmSettings>) {
     void settings.update({ llm: { ...settings.current.llm, ...patch } });
+  }
+
+  function correctionRows() {
+    return settings.current.commonly_misheard ?? [];
+  }
+
+  async function addCorrection() {
+    const next = [...correctionRows(), { wrong: "", right: "" }];
+    await settings.update({ commonly_misheard: next });
+  }
+
+  async function updateCorrection(index: number, key: "wrong" | "right", value: string) {
+    const next = correctionRows().map((row, i) => (i === index ? { ...row, [key]: value } : row));
+    await settings.update({ commonly_misheard: next });
+  }
+
+  async function removeCorrection(index: number) {
+    const next = correctionRows().filter((_, i) => i !== index);
+    await settings.update({ commonly_misheard: next });
   }
 
   function updateEmbed(patch: Partial<EmbedSettings>) {
@@ -731,10 +750,11 @@
                     <span>Privacy mode</span>
                   </label>
                   <p class="settings-help">
-                    Skips the LLM cleanup pass entirely — useful when you're dictating sensitive
-                    content you don't want any model (local or cloud) to see. Behaves like selecting <em
-                      >Raw</em
-                    > style on local-only setups; matters most when a cloud BYOK endpoint is configured.
+                    Skips the LLM cleanup pass entirely <em>and</em> suppresses any context the
+                    cleanup prompt would otherwise pull in (foreground app name, window title,
+                    focused-window OCR). Useful when you're dictating sensitive content you don't
+                    want any model (local or cloud) to see. Behaves like selecting <em>Raw</em>
+                    style on local-only setups; matters most when a cloud BYOK endpoint is configured.
                     Whisper transcription still runs locally.
                   </p>
                 </section>
@@ -802,8 +822,10 @@
                       </div>
                     </div>
                     <p class="settings-help">
-                      boothrflow needs three permissions on macOS. Click each to open the relevant
-                      pane in System Settings, toggle the switch, then relaunch.
+                      boothrflow uses up to four permissions on macOS. The first three are required;
+                      Screen Recording is optional and only used when the OCR cleanup context toggle
+                      is on. Click each to open the relevant pane in System Settings, toggle the
+                      switch, then relaunch.
                     </p>
                     <ol class="permission-list">
                       <li>
@@ -841,6 +863,17 @@
                           class="quiet-button"
                           type="button"
                           onclick={() => void openPermissionPane("input_monitoring")}>Open</button
+                        >
+                      </li>
+                      <li>
+                        <div>
+                          <strong>Screen Recording</strong>
+                          <small>Optional — only used when LLM → "focused-window OCR" is on</small>
+                        </div>
+                        <button
+                          class="quiet-button"
+                          type="button"
+                          onclick={() => void openPermissionPane("screen_recording")}>Open</button
                         >
                       </li>
                     </ol>
@@ -923,6 +956,26 @@
                     />
                   </label>
 
+                  <label class="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.current.cleanup_window_ocr ?? false}
+                      onchange={(event) =>
+                        void settings.update({
+                          cleanup_window_ocr: event.currentTarget.checked,
+                        })}
+                    />
+                    <span>Use focused-window OCR as cleanup context (preview)</span>
+                  </label>
+                  <p class="settings-help">
+                    Captures the visible text of the focused window and feeds it to the cleanup
+                    prompt as supporting context — helps disambiguate names, models, and jargon that
+                    Whisper mishears. macOS requires Screen Recording permission. Disabled
+                    automatically when <em>Privacy mode</em> is on. The capture path is being
+                    finalized in a follow-up — see
+                    <code>docs/waves/wave-5-context-aware-cleanup.md</code>.
+                  </p>
+
                   <div class="settings-actions">
                     <button
                       class="quiet-button"
@@ -983,9 +1036,48 @@
                         void settings.update({ vocabulary: event.currentTarget.value })}
                     ></textarea>
                     <small
-                      >Appended to Whisper's initial prompt — biases recognition toward these terms.</small
+                      >Appended to Whisper's initial prompt — biases recognition toward these terms.
+                      Also injected into the LLM cleanup prompt's authoritative-spelling block.</small
                     >
                   </label>
+
+                  <div class="settings-field">
+                    <span>Common mishearings</span>
+                    {#each correctionRows() as pair, index (index)}
+                      <div class="correction-row">
+                        <input
+                          type="text"
+                          placeholder="wrong"
+                          value={pair.wrong}
+                          oninput={(event) =>
+                            void updateCorrection(index, "wrong", event.currentTarget.value)}
+                        />
+                        <span class="correction-arrow" aria-hidden="true">→</span>
+                        <input
+                          type="text"
+                          placeholder="right"
+                          value={pair.right}
+                          oninput={(event) =>
+                            void updateCorrection(index, "right", event.currentTarget.value)}
+                        />
+                        <button
+                          class="quiet-button"
+                          type="button"
+                          aria-label="Remove correction"
+                          onclick={() => void removeCorrection(index)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    {/each}
+                    <button class="quiet-button" type="button" onclick={() => void addCorrection()}>
+                      Add correction
+                    </button>
+                    <small
+                      >Wrong → right pairs the LLM applies as authoritative substitutions (e.g.
+                      "kwen" → "Qwen"). Empty rows are ignored.</small
+                    >
+                  </div>
                 </section>
               {:else if activeSettingsSection === "history"}
                 <section class="settings-section">

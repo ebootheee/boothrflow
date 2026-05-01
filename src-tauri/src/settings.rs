@@ -83,6 +83,25 @@ pub struct AppStyleOverride {
     pub style: Style,
 }
 
+/// Wrong → right substitution recorded by the user (manually edited in
+/// Settings) or by the post-paste learning coordinator (auto-derived
+/// from edits the user makes after a paste). The cleanup prompt
+/// honors these as authoritative spellings.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq, Hash)]
+pub struct MisheardReplacement {
+    pub wrong: String,
+    pub right: String,
+}
+
+impl MisheardReplacement {
+    pub fn new(wrong: impl Into<String>, right: impl Into<String>) -> Self {
+        Self {
+            wrong: wrong.into().trim().to_string(),
+            right: right.into().trim().to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
 pub struct AppSettings {
     pub schema_version: u16,
@@ -94,6 +113,17 @@ pub struct AppSettings {
     pub hotkeys: HotkeySettings,
     pub vocabulary: String,
     pub per_app_styles: Vec<AppStyleOverride>,
+    /// Wrong → right substitutions injected into the cleanup prompt's
+    /// `<USER-CORRECTIONS>` block. Auto-populated by the post-paste
+    /// learning coordinator (Wave 5); manually editable in Settings.
+    #[serde(default)]
+    pub commonly_misheard: Vec<MisheardReplacement>,
+    /// Pull the focused window's OCR contents into the cleanup prompt
+    /// as supporting context (Wave 5). Off by default; opt-in. Honors
+    /// `privacy_mode` — when privacy is on, OCR is skipped regardless
+    /// of this flag.
+    #[serde(default)]
+    pub cleanup_window_ocr: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]
@@ -115,6 +145,10 @@ pub struct SettingsPatch {
     pub vocabulary: Option<String>,
     #[specta(optional)]
     pub per_app_styles: Option<Vec<AppStyleOverride>>,
+    #[specta(optional)]
+    pub commonly_misheard: Option<Vec<MisheardReplacement>>,
+    #[specta(optional)]
+    pub cleanup_window_ocr: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -183,6 +217,8 @@ impl Default for AppSettings {
             hotkeys: HotkeySettings::default(),
             vocabulary: std::env::var("BOOTHRFLOW_WHISPER_PROMPT").unwrap_or_default(),
             per_app_styles: Vec::new(),
+            commonly_misheard: Vec::new(),
+            cleanup_window_ocr: false,
         }
     }
 }
@@ -228,6 +264,9 @@ impl SettingsStore {
             hotkeys: self.get_or("hotkeys", fallback.hotkeys)?,
             vocabulary: self.get_or("vocabulary", fallback.vocabulary)?,
             per_app_styles: self.get_or("per_app_styles", fallback.per_app_styles)?,
+            commonly_misheard: self.get_or("commonly_misheard", fallback.commonly_misheard)?,
+            cleanup_window_ocr: self
+                .get_or("cleanup_window_ocr", fallback.cleanup_window_ocr)?,
         };
         // Prefer the OS keychain over whatever's in the settings JSON.
         // Keys land in JSON only as a legacy migration path or when the
@@ -274,6 +313,12 @@ impl SettingsStore {
         }
         if let Some(per_app_styles) = patch.per_app_styles {
             settings.per_app_styles = per_app_styles;
+        }
+        if let Some(commonly_misheard) = patch.commonly_misheard {
+            settings.commonly_misheard = commonly_misheard;
+        }
+        if let Some(cleanup_window_ocr) = patch.cleanup_window_ocr {
+            settings.cleanup_window_ocr = cleanup_window_ocr;
         }
 
         validate_settings(&settings)?;
@@ -332,6 +377,8 @@ impl SettingsStore {
         self.set("hotkeys", &settings.hotkeys)?;
         self.set("vocabulary", &settings.vocabulary)?;
         self.set("per_app_styles", &settings.per_app_styles)?;
+        self.set("commonly_misheard", &settings.commonly_misheard)?;
+        self.set("cleanup_window_ocr", settings.cleanup_window_ocr)?;
         self.store
             .save()
             .map_err(|e| BoothError::internal(format!("settings save: {e}")))?;
@@ -660,6 +707,11 @@ fn default_store_entries() -> Result<HashMap<String, JsonValue>> {
     entries.insert("hotkeys".into(), json(defaults.hotkeys)?);
     entries.insert("vocabulary".into(), json(defaults.vocabulary)?);
     entries.insert("per_app_styles".into(), json(defaults.per_app_styles)?);
+    entries.insert("commonly_misheard".into(), json(defaults.commonly_misheard)?);
+    entries.insert(
+        "cleanup_window_ocr".into(),
+        json(defaults.cleanup_window_ocr)?,
+    );
     Ok(entries)
 }
 

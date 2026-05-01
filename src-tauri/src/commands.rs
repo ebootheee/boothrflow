@@ -194,6 +194,12 @@ pub enum MacPermissionPane {
     Microphone,
     Accessibility,
     InputMonitoring,
+    /// Required for the Wave 5 focused-window OCR capture path. The
+    /// runtime call site is still a stub on every platform — see
+    /// `docs/waves/wave-5-context-aware-cleanup.md` — but exposing the
+    /// pane lets users pre-grant the permission so the first OCR
+    /// capture after wiring doesn't fail with a denied prompt.
+    ScreenRecording,
 }
 
 /// Open the relevant Privacy & Security pane in System Settings. No-op on
@@ -213,6 +219,9 @@ pub fn open_macos_setting(pane: MacPermissionPane) -> Result<(), BoothError> {
             }
             MacPermissionPane::InputMonitoring => {
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+            }
+            MacPermissionPane::ScreenRecording => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
             }
         };
         std::process::Command::new("open")
@@ -485,7 +494,7 @@ pub async fn llm_test_connection(
                 .cleanup(CleanupRequest {
                     raw_text: "ping",
                     style: crate::settings::Style::Raw,
-                    app_context: None,
+                    ..Default::default()
                 })
                 .map(|_| ())
         })

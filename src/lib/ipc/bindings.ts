@@ -83,6 +83,19 @@ export type AppSettings = {
 	hotkeys: HotkeySettings,
 	vocabulary: string,
 	per_app_styles: AppStyleOverride[],
+	/**
+	 *  Wrong → right substitutions injected into the cleanup prompt's
+	 *  `<USER-CORRECTIONS>` block. Auto-populated by the post-paste
+	 *  learning coordinator (Wave 5); manually editable in Settings.
+	 */
+	commonly_misheard?: MisheardReplacement[],
+	/**
+	 *  Pull the focused window's OCR contents into the cleanup prompt
+	 *  as supporting context (Wave 5). Off by default; opt-in. Honors
+	 *  `privacy_mode` — when privacy is on, OCR is skipped regardless
+	 *  of this flag.
+	 */
+	cleanup_window_ocr?: boolean,
 };
 
 export type AppStyleOverride = {
@@ -164,7 +177,26 @@ export type LlmTestResult = {
 	error: string | null,
 };
 
-export type MacPermissionPane = "microphone" | "accessibility" | "input_monitoring";
+export type MacPermissionPane = "microphone" | "accessibility" | "input_monitoring" | 
+/**
+ *  Required for the Wave 5 focused-window OCR capture path. The
+ *  runtime call site is still a stub on every platform — see
+ *  `docs/waves/wave-5-context-aware-cleanup.md` — but exposing the
+ *  pane lets users pre-grant the permission so the first OCR
+ *  capture after wiring doesn't fail with a denied prompt.
+ */
+"screen_recording";
+
+/**
+ *  Wrong → right substitution recorded by the user (manually edited in
+ *  Settings) or by the post-paste learning coordinator (auto-derived
+ *  from edits the user makes after a paste). The cleanup prompt
+ *  honors these as authoritative spellings.
+ */
+export type MisheardReplacement = {
+	wrong: string,
+	right: string,
+};
 
 export type ModelOption = {
 	value: string,
@@ -202,6 +234,8 @@ export type SettingsPatch = {
 	hotkeys?: HotkeySettings | null,
 	vocabulary?: string | null,
 	per_app_styles?: AppStyleOverride[] | null,
+	commonly_misheard?: MisheardReplacement[] | null,
+	cleanup_window_ocr?: boolean | null,
 };
 
 export type Style = "raw" | "formal" | "casual" | "excited" | "very-casual" | 

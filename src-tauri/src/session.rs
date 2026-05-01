@@ -35,6 +35,7 @@ mod real {
     use std::sync::Arc;
 
     use crate::audio::{AudioFrame, AudioSource, CpalAudioSource};
+    use crate::context::{ContextDetector, RealContextDetector};
     use crate::history::{HistoryStore, RecordRequest};
     use crate::hotkey::{HotkeyEvent, HotkeySource, RdevHotkeySource};
     use crate::injector::{ClipboardInjector, Injector};
@@ -117,6 +118,7 @@ mod real {
         );
 
         let audio = CpalAudioSource::new();
+        let context_detector = RealContextDetector::new();
 
         // Whisper is hot-swappable from Settings. Load once at startup, then
         // reload on the next press if the configured model file changes.
@@ -278,6 +280,7 @@ mod real {
                                 engine,
                                 injector.as_ref(),
                                 history.as_deref(),
+                                &context_detector,
                                 dictation_started,
                                 capture_ms,
                                 &pcm,
@@ -374,6 +377,7 @@ mod real {
         engine: &WhisperSttEngine,
         injector: Option<&ClipboardInjector>,
         history: Option<&HistoryStore>,
+        context_detector: &dyn ContextDetector,
         dictation_started: Instant,
         capture_ms: u64,
         pcm: &[f32],
@@ -412,11 +416,32 @@ mod real {
             return;
         }
 
+        // Capture the focused-app context once (cheap on Mac/Win — a few
+        // syscalls). The result feeds both the cleanup prompt's app-aware
+        // hints and the history record (so per-app filtering / counts in
+        // the UI work without re-walking the OS later).
+        let app_context = context_detector.detect();
+        if let Some(ctx) = &app_context {
+            tracing::debug!("context: app={} window={:?}", ctx.app_exe, ctx.window_title);
+        }
+
+        // Window OCR: opt-in via Settings + skipped when privacy mode is
+        // on. Wave 5 ships the structure; the actual Vision-framework
+        // call lives in `crate::ocr` and is gated by the Screen Recording
+        // TCC permission. None on platforms without an OCR backend.
+        let window_ocr = if !settings::privacy_mode_enabled()
+            && settings::current_app_settings().cleanup_window_ocr
+        {
+            crate::ocr::capture_focused_window_text(app_context.as_ref()).ok()
+        } else {
+            None
+        };
+
         // Optional LLM cleanup pass. Skip for short / opted-out cases; fall
         // back to raw transcript on any LLM failure.
         emit_stage(app, "cleaning", dictation_started);
         let style = settings::current_style();
-        let cleanup = run_llm_cleanup(&stt_result.text, style);
+        let cleanup = run_llm_cleanup(&stt_result.text, style, app_context.clone(), window_ocr);
         if let Some(err) = cleanup.error {
             // Surface so the UI can show "Cleanup unavailable — using raw"
             // instead of silently displaying 0 ms.
@@ -455,8 +480,10 @@ mod real {
                 raw: stt_result.text.clone(),
                 formatted: formatted.clone(),
                 style,
-                app_exe: None, // populated when W5 wires context detection
-                window_title: None,
+                app_exe: app_context.as_ref().map(|c| c.app_exe.clone()),
+                window_title: app_context
+                    .as_ref()
+                    .and_then(|c| c.window_title.clone()),
                 duration_ms: capture_ms,
                 llm_ms,
             };
@@ -512,7 +539,12 @@ mod real {
         }
     }
 
-    fn run_llm_cleanup(raw: &str, style: settings::Style) -> CleanupOutcome {
+    fn run_llm_cleanup(
+        raw: &str,
+        style: settings::Style,
+        app_context: Option<crate::context::AppContext>,
+        window_ocr: Option<String>,
+    ) -> CleanupOutcome {
         // Hard skips: explicit raw style, no LLM loaded, very short utterance.
         if matches!(style, settings::Style::Raw) || settings::privacy_mode_enabled() {
             return CleanupOutcome::passthrough(raw);
@@ -533,10 +565,19 @@ mod real {
             return CleanupOutcome::passthrough(raw);
         }
 
+        // Wave 5: pull the user's vocab + corrections out of settings and
+        // hand them to the cleanup prompt. The prompt builder emits
+        // <USER-CORRECTIONS> + <OCR-RULES> blocks ghost-pepper-style.
+        let preferred = parse_vocabulary(&settings.vocabulary);
+        let commonly_misheard = settings.commonly_misheard.clone();
+
         match llm.cleanup(CleanupRequest {
             raw_text: raw,
             style,
-            app_context: None,
+            app_context,
+            window_ocr,
+            preferred_transcriptions: preferred,
+            commonly_misheard,
         }) {
             Ok(out) => {
                 let tok_per_sec = out.tokens_per_second();
@@ -569,6 +610,24 @@ mod real {
 
     fn emit_result(app: &AppHandle, result: &SttResult) {
         let _ = app.emit("dictation:result", result);
+    }
+
+    /// Parse the user's free-text vocabulary setting into a normalized
+    /// list of distinct terms. Splits on commas / newlines, trims, drops
+    /// blanks, dedupes (case-sensitive — proper-noun casing matters).
+    fn parse_vocabulary(text: &str) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for raw in text.split([',', '\n', ';']) {
+            let term = raw.trim();
+            if term.is_empty() {
+                continue;
+            }
+            if seen.insert(term.to_string()) {
+                out.push(term.to_string());
+            }
+        }
+        out
     }
 
     fn summarize(frames: &[AudioFrame], elapsed: Duration) -> DictationSummary {
