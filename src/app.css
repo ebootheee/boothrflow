@@ -310,10 +310,14 @@ kbd {
   white-space: nowrap;
 }
 
+/* Equal-width Transcript / Pipeline columns. Was `minmax(0, 1fr) 360px`,
+   which made Pipeline a fixed sidebar — at typical window widths the
+   Transcript got squeezed and Pipeline had a lot of empty space. Casper's
+   PR #3 spec'd 1fr / 1fr so the two read as paired panels. */
 .workspace-grid {
   display: grid;
   align-items: start;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
   margin-bottom: 10px;
 }

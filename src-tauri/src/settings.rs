@@ -9,6 +9,14 @@ use tauri_plugin_store::{JsonValue, Store, StoreBuilder};
 
 use crate::error::{BoothError, Result};
 
+mod secrets;
+pub use secrets::keychain_status;
+
+/// `keyring::Entry` service identifier. Same string for all of our secrets.
+const KEYRING_SERVICE: &str = "dev.boothe.boothrflow";
+const KEYRING_LLM_ACCOUNT: &str = "llm_api_key";
+const KEYRING_EMBED_ACCOUNT: &str = "embed_api_key";
+
 const CURRENT_SCHEMA_VERSION: u16 = 1;
 const STORE_FILE: &str = "boothrflow.settings.json";
 
@@ -187,7 +195,7 @@ impl SettingsStore {
 
     pub fn load(&self) -> Result<AppSettings> {
         let fallback = AppSettings::default();
-        let settings = AppSettings {
+        let mut settings = AppSettings {
             schema_version: self.get_or("schema_version", fallback.schema_version)?,
             style: self.get_or("style", fallback.style)?,
             privacy_mode: self.get_or("privacy", fallback.privacy_mode)?,
@@ -198,6 +206,17 @@ impl SettingsStore {
             vocabulary: self.get_or("vocabulary", fallback.vocabulary)?,
             per_app_styles: self.get_or("per_app_styles", fallback.per_app_styles)?,
         };
+        // Prefer the OS keychain over whatever's in the settings JSON.
+        // Keys land in JSON only as a legacy migration path or when the
+        // keychain backend is unavailable (Linux without secret-service,
+        // headless CI). We OR the keychain value over the JSON value so a
+        // post-migration save naturally strips the JSON copy.
+        if let Some(key) = secrets::read(KEYRING_LLM_ACCOUNT) {
+            settings.llm.api_key = Some(key);
+        }
+        if let Some(key) = secrets::read(KEYRING_EMBED_ACCOUNT) {
+            settings.embed.api_key = Some(key);
+        }
         let settings = migrate(settings);
         validate_settings(&settings)?;
         Ok(settings)
@@ -257,12 +276,36 @@ impl SettingsStore {
     }
 
     fn save_all(&self, settings: &AppSettings) -> Result<()> {
+        // Move API keys into the OS keychain when available. The JSON
+        // copy gets stripped only when the keychain successfully owns
+        // the secret — on platforms without a backend we leave the JSON
+        // path intact rather than silently dropping the key.
+        secrets::write(KEYRING_LLM_ACCOUNT, settings.llm.api_key.as_deref());
+        secrets::write(KEYRING_EMBED_ACCOUNT, settings.embed.api_key.as_deref());
+
+        let llm_for_store = if secrets::strip_from_json() {
+            LlmSettings {
+                api_key: None,
+                ..settings.llm.clone()
+            }
+        } else {
+            settings.llm.clone()
+        };
+        let embed_for_store = if secrets::strip_from_json() {
+            EmbedSettings {
+                api_key: None,
+                ..settings.embed.clone()
+            }
+        } else {
+            settings.embed.clone()
+        };
+
         self.set("schema_version", settings.schema_version)?;
         self.set("style", settings.style)?;
         self.set("privacy", settings.privacy_mode)?;
         self.set("whisper", &settings.whisper)?;
-        self.set("llm", &settings.llm)?;
-        self.set("embed", &settings.embed)?;
+        self.set("llm", &llm_for_store)?;
+        self.set("embed", &embed_for_store)?;
         self.set("hotkeys", &settings.hotkeys)?;
         self.set("vocabulary", &settings.vocabulary)?;
         self.set("per_app_styles", &settings.per_app_styles)?;
