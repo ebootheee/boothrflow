@@ -730,6 +730,13 @@
                     />
                     <span>Privacy mode</span>
                   </label>
+                  <p class="settings-help">
+                    Skips the LLM cleanup pass entirely — useful when you're dictating sensitive
+                    content you don't want any model (local or cloud) to see. Behaves like selecting <em
+                      >Raw</em
+                    > style on local-only setups; matters most when a cloud BYOK endpoint is configured.
+                    Whisper transcription still runs locally.
+                  </p>
                 </section>
 
                 <section class="settings-section">
@@ -857,6 +864,13 @@
                     />
                     <span>LLM cleanup</span>
                   </label>
+                  <p class="settings-help">
+                    Sends the raw Whisper transcript through a small local LLM (Qwen 2.5 by default
+                    via Ollama) that adds punctuation, capitalization, splits run-on sentences,
+                    drops disfluencies (<em>uh</em>, <em>um</em>, <em>you know</em>), and corrects
+                    context-mismatched words. Disable to paste the raw STT output verbatim — same
+                    effect as selecting <em>Raw</em> style.
+                  </p>
 
                   <div class="preset-chips" aria-label="LLM endpoint presets">
                     <span class="preset-chips-label">Presets</span>
@@ -887,7 +901,7 @@
                       onchange={(event) => updateLlm({ model: event.currentTarget.value })}
                     >
                       {#each settings.options.llm_models as option (option.value)}
-                        <option value={option.value}
+                        <option value={option.value} disabled={!option.available}
                           >{option.label}{option.value === settings.current.llm.model
                             ? " (active)"
                             : ""}</option
@@ -944,7 +958,7 @@
                       onchange={(event) => void settings.setWhisperModel(event.currentTarget.value)}
                     >
                       {#each settings.options.whisper_models as option (option.value)}
-                        <option value={option.value}
+                        <option value={option.value} disabled={!option.available}
                           >{option.label}{option.value === settings.current.whisper.model
                             ? " (active)"
                             : ""}</option
@@ -999,7 +1013,9 @@
                       onchange={(event) => updateEmbed({ model: event.currentTarget.value })}
                     >
                       {#each settings.options.embed_models as option (option.value)}
-                        <option value={option.value}>{option.label}</option>
+                        <option value={option.value} disabled={!option.available}
+                          >{option.label}</option
+                        >
                       {/each}
                     </select>
                   </label>

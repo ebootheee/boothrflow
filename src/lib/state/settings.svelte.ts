@@ -66,6 +66,12 @@ export type ModelOption = {
   label: string;
   detail: string;
   file: string | null;
+  /**
+   * Whether this option is selectable. `false` for engines listed as
+   * roadmap signals (Parakeet TDT today) that haven't been wired yet —
+   * the dropdown shows them disabled.
+   */
+  available: boolean;
 };
 
 export type SettingsOptions = {
@@ -114,30 +120,43 @@ const defaultOptions: SettingsOptions = {
       label: "Whisper tiny.en (39M, 75MB)",
       detail: "Fastest, lowest accuracy.",
       file: "ggml-tiny.en.bin",
+      available: true,
     },
     {
       value: "base.en",
       label: "Whisper base.en (74M, 142MB)",
       detail: "Still quick, noticeably cleaner than tiny.",
       file: "ggml-base.en.bin",
+      available: true,
     },
     {
       value: "small.en",
       label: "Whisper small.en (244M, 466MB)",
       detail: "Recommended quality/speed balance.",
       file: "ggml-small.en.bin",
+      available: true,
     },
     {
       value: "medium.en",
       label: "Whisper medium.en (769M, 1.5GB)",
       detail: "Better accuracy, higher latency.",
       file: "ggml-medium.en.bin",
+      available: true,
     },
     {
       value: "large-v3-turbo",
       label: "Whisper large-v3-turbo (809M, 1.6GB)",
       detail: "Best local quality option for strong Macs.",
       file: "ggml-large-v3-turbo.bin",
+      available: true,
+    },
+    {
+      value: "parakeet-tdt-0.6b-v3",
+      label: "NVIDIA Parakeet TDT 0.6B v3 (coming soon — Wave 5+)",
+      detail:
+        "Faster + more accurate than Whisper, native streaming. Wired via sherpa-onnx in a later wave.",
+      file: "parakeet-tdt-0.6b-v3.onnx",
+      available: false,
     },
   ],
   llm_models: [
@@ -146,12 +165,14 @@ const defaultOptions: SettingsOptions = {
       label: "Qwen 2.5 7B Instruct (~5GB, ~80 tok/s on M4)",
       detail: "Higher-quality local cleanup default.",
       file: null,
+      available: true,
     },
     {
       value: "qwen2.5:1.5b",
       label: "Qwen 2.5 1.5B Instruct (~1GB, faster)",
       detail: "Lower-latency fallback for slower machines.",
       file: null,
+      available: true,
     },
   ],
   embed_models: [
@@ -160,6 +181,7 @@ const defaultOptions: SettingsOptions = {
       label: "nomic-embed-text v1.5 (137M, 274MB)",
       detail: "Default local embedding model for history search.",
       file: null,
+      available: true,
     },
   ],
 };

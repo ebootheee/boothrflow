@@ -121,12 +121,26 @@ pub struct ModelOption {
     pub label: String,
     pub detail: String,
     pub file: Option<String>,
+    /// Whether this option is selectable. `false` for engines we list in
+    /// the picker as a roadmap signal but haven't wired the inference for
+    /// yet (e.g. Parakeet TDT until the sherpa-onnx pivot in Wave 5+).
+    /// FE disables the corresponding `<option>` element.
+    #[serde(default = "default_true")]
+    pub available: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone)]
 pub struct WhisperModel {
     pub value: &'static str,
     pub file: &'static str,
+    /// `false` for engines we list as roadmap signal but haven't wired
+    /// inference for. Selectability gated by this flag in the FE picker
+    /// + by `validate_settings` so the daemon never tries to load.
+    pub available: bool,
     pub label: &'static str,
     pub detail: &'static str,
     pub download_arg: &'static str,
@@ -392,6 +406,7 @@ pub fn settings_options() -> SettingsOptions {
                 label: m.label.to_string(),
                 detail: m.detail.to_string(),
                 file: Some(m.file.to_string()),
+                available: m.available,
             })
             .collect(),
         llm_models: vec![
@@ -400,12 +415,14 @@ pub fn settings_options() -> SettingsOptions {
                 label: "Qwen 2.5 7B Instruct (~5GB, ~80 tok/s on M4)".into(),
                 detail: "Higher-quality local cleanup default.".into(),
                 file: None,
+                available: true,
             },
             ModelOption {
                 value: "qwen2.5:1.5b".into(),
                 label: "Qwen 2.5 1.5B Instruct (~1GB, faster)".into(),
                 detail: "Lower-latency fallback for slower machines.".into(),
                 file: None,
+                available: true,
             },
         ],
         embed_models: vec![ModelOption {
@@ -413,6 +430,7 @@ pub fn settings_options() -> SettingsOptions {
             label: "nomic-embed-text v1.5 (137M, 274MB)".into(),
             detail: "Default local embedding model for history search.".into(),
             file: None,
+            available: true,
         }],
     }
 }
@@ -422,6 +440,7 @@ pub fn whisper_models() -> Vec<WhisperModel> {
         WhisperModel {
             value: "tiny.en",
             file: "ggml-tiny.en.bin",
+            available: true,
             label: "Whisper tiny.en (39M, 75MB)",
             detail: "Fastest, lowest accuracy.",
             download_arg: "tiny",
@@ -429,6 +448,7 @@ pub fn whisper_models() -> Vec<WhisperModel> {
         WhisperModel {
             value: "base.en",
             file: "ggml-base.en.bin",
+            available: true,
             label: "Whisper base.en (74M, 142MB)",
             detail: "Still quick, noticeably cleaner than tiny.",
             download_arg: "base",
@@ -436,6 +456,7 @@ pub fn whisper_models() -> Vec<WhisperModel> {
         WhisperModel {
             value: "small.en",
             file: "ggml-small.en.bin",
+            available: true,
             label: "Whisper small.en (244M, 466MB)",
             detail: "Recommended quality/speed balance.",
             download_arg: "small",
@@ -443,6 +464,7 @@ pub fn whisper_models() -> Vec<WhisperModel> {
         WhisperModel {
             value: "medium.en",
             file: "ggml-medium.en.bin",
+            available: true,
             label: "Whisper medium.en (769M, 1.5GB)",
             detail: "Better accuracy, higher latency.",
             download_arg: "medium",
@@ -450,9 +472,22 @@ pub fn whisper_models() -> Vec<WhisperModel> {
         WhisperModel {
             value: "large-v3-turbo",
             file: "ggml-large-v3-turbo.bin",
+            available: true,
             label: "Whisper large-v3-turbo (809M, 1.6GB)",
             detail: "Best local quality option for strong Macs.",
             download_arg: "large-v3-turbo",
+        },
+        // NVIDIA Parakeet TDT 0.6B v3 — listed as a roadmap signal so the
+        // user can see the upcoming engine pivot. Disabled in the picker
+        // until the sherpa-onnx integration in Wave 5+ wires the actual
+        // inference path. See ADR-009.
+        WhisperModel {
+            value: "parakeet-tdt-0.6b-v3",
+            file: "parakeet-tdt-0.6b-v3.onnx",
+            available: false,
+            label: "NVIDIA Parakeet TDT 0.6B v3 (coming soon — Wave 5+)",
+            detail: "Faster + more accurate than Whisper, native streaming. Wired via sherpa-onnx in a later wave.",
+            download_arg: "parakeet",
         },
     ]
 }
@@ -484,10 +519,20 @@ pub fn normalize_whisper_model(value: &str) -> String {
 }
 
 pub fn validate_settings(settings: &AppSettings) -> Result<()> {
-    if whisper_model_for(&settings.whisper.model).is_none() {
+    let Some(model) = whisper_model_for(&settings.whisper.model) else {
         return Err(BoothError::internal(format!(
             "unsupported Whisper model: {}",
             settings.whisper.model
+        )));
+    };
+    // Reject roadmap-only entries (Parakeet today). The FE picker disables
+    // the option, but defense-in-depth: a user editing the JSON directly
+    // shouldn't be able to wedge the daemon trying to load a non-Whisper
+    // file through a Whisper code path.
+    if !model.available {
+        return Err(BoothError::internal(format!(
+            "{} is not yet available — pick a Whisper model for now",
+            model.label
         )));
     }
     validate_hotkey_bindings(&settings.hotkeys)
