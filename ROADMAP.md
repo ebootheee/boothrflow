@@ -133,6 +133,8 @@ Goal: beats Wispr Flow on memory.
 Goal: 1.0.
 
 - **NVIDIA Parakeet TDT 0.6B v3** as default STT (faster, more accurate, native streaming) via `sherpa-onnx`. Whisper becomes the multilingual fallback.
+  - **Status:** scaffolded. Listed in the model picker as a `available: false` preview entry (commit `a8f5b52`); `validate_settings` rejects selection so the daemon can't try to load. Bindings file already exposes the option to the FE.
+  - **Concrete work to land:** (a) add `sherpa-rs` Rust binding crate + the sherpa-onnx C++ runtime to the build (similar effort to whisper.cpp); (b) extend the model-download script to fetch Parakeet's ONNX file set (encoder + decoder + joiner + `tokens.txt`); (c) new `stt/parakeet.rs` implementing `SttEngine`; (d) add an `engine: "whisper" | "parakeet"` field to `WhisperSettings` (or rename to `SttSettings`); (e) `session.rs` dispatches on engine; (f) decide streaming behavior — Parakeet has native chunked streaming, so the LA2-on-cumulative-buffer path doesn't apply, we'd either skip partials or use sherpa's streaming API; (g) flip `available: true` in `whisper_models()`. ~1-2 focused days.
 - **TEN-VAD** swap-in (faster endpoint detection than Silero).
 - **Onboarding wizard** — model download, mic test, hotkey config, accessibility permissions (macOS), Windows SmartScreen explainer.
 - **Code signing** — Azure Trusted Signing on Windows, Developer ID + notarization on macOS.
