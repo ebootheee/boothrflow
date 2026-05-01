@@ -259,6 +259,53 @@ function createSettings() {
     return state.current;
   }
 
+  /** Probe the configured LLM endpoint with a 1-token request. */
+  async function testLlmConnection(): Promise<{
+    ok: boolean;
+    latency_ms: number;
+    error: string | null;
+  }> {
+    if (!isTauri()) {
+      return { ok: true, latency_ms: 0, error: null };
+    }
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke("llm_test_connection");
+  }
+
+  async function getAppVersion(): Promise<string> {
+    if (!isTauri()) return "0.0.0-web";
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<string>("app_version");
+  }
+
+  async function revealPath(path: string): Promise<void> {
+    if (!isTauri()) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("reveal_path", { path });
+  }
+
+  /**
+   * Autostart toggle wraps `tauri-plugin-autostart`. The plugin exposes
+   * its own JS module; we call it through `invoke` against the plugin's
+   * internal command name to avoid a separate import in the bundle.
+   */
+  async function getAutostartEnabled(): Promise<boolean> {
+    if (!isTauri()) return false;
+    try {
+      const { isEnabled } = await import("@tauri-apps/plugin-autostart");
+      return await isEnabled();
+    } catch {
+      return false;
+    }
+  }
+
+  async function setAutostartEnabled(enabled: boolean): Promise<void> {
+    if (!isTauri()) return;
+    const mod = await import("@tauri-apps/plugin-autostart");
+    if (enabled) await mod.enable();
+    else await mod.disable();
+  }
+
   return {
     get current() {
       return state.current;
@@ -307,6 +354,11 @@ function createSettings() {
     setWhisperModel,
     exportJson,
     importJson,
+    testLlmConnection,
+    getAppVersion,
+    revealPath,
+    getAutostartEnabled,
+    setAutostartEnabled,
   };
 }
 

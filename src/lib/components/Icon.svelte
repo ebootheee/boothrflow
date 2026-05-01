@@ -9,6 +9,7 @@
     | "database"
     | "download"
     | "history"
+    | "info"
     | "key"
     | "languages"
     | "lock"
@@ -81,6 +82,10 @@
     <path d="M4 12a8 8 0 1 0 3-6" />
     <path d="M4 5v5h5" />
     <path d="M12 8v5l3 2" />
+  {:else if name === "info"}
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 8h.01" />
+    <path d="M11 12h1v4h1" />
   {:else if name === "key"}
     <circle cx="7.5" cy="14.5" r="4.5" />
     <path d="m11 11 8-8" />

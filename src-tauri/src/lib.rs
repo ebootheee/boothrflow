@@ -32,9 +32,9 @@ pub mod tray;
 pub mod vad;
 
 use commands::{
-    dictate_once, microphone_available, open_macos_setting, set_dictation_style, settings_export,
-    settings_get, settings_import, settings_options, settings_update, whisper_download_model,
-    whisper_model_name,
+    app_version, dictate_once, llm_test_connection, microphone_available, open_macos_setting,
+    reveal_path, set_dictation_style, settings_export, settings_get, settings_import,
+    settings_options, settings_update, whisper_download_model, whisper_model_name,
 };
 use tauri::Manager;
 use tauri::WindowEvent;
@@ -67,6 +67,12 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        // Autostart for the "Launch at login" toggle in Settings → General.
+        // LaunchAgent on macOS, registry / .desktop on Windows / Linux.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         // Intercept the red-X close on the main window: hide instead of
         // destroying. Without this, X-clicking would `close()` the window
         // and Tauri would drop it; subsequent `app.get_webview_window("main")`
@@ -106,6 +112,9 @@ pub fn run() {
             settings_export,
             settings_import,
             whisper_download_model,
+            llm_test_connection,
+            app_version,
+            reveal_path,
         ]);
     }
     #[cfg(not(feature = "real-engines"))]
@@ -122,6 +131,9 @@ pub fn run() {
             settings_export,
             settings_import,
             whisper_download_model,
+            llm_test_connection,
+            app_version,
+            reveal_path,
         ]);
     }
     builder

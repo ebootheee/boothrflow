@@ -604,6 +604,197 @@ kbd {
   padding: 10px;
 }
 
+/* Sidebar layout for the Settings modal — Casper PR #2's shape, ported.
+   Sidebar on the left, content pane on the right. The content pane is
+   itself a vertical stack of `.settings-section` cards so the typography
+   stays consistent with the inline-grid version we shipped in Wave 4B. */
+.settings-shell {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 0;
+  min-height: 420px;
+}
+
+.settings-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--line);
+  background: #f7faf9;
+  padding: 10px 8px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 720;
+  text-align: left;
+  padding: 7px 9px;
+}
+
+.settings-nav-item:hover {
+  background: var(--muted);
+}
+
+.settings-nav-item.active {
+  background: var(--paper);
+  color: var(--brand);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+/* Re-purpose the existing .settings-section card for sidebar mode — same
+   visual, no grid container around it. */
+.settings-content .settings-section {
+  margin: 0;
+}
+
+.settings-help {
+  margin: 0;
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.permission-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.permission-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: #fff;
+  padding: 7px 9px;
+}
+
+.permission-list strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.permission-list small {
+  display: block;
+  margin-top: 2px;
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.preset-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset-chips-label {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0;
+  line-height: 1.1;
+  text-transform: uppercase;
+  margin-right: 2px;
+}
+
+.preset-chip {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 720;
+  padding: 4px 10px;
+}
+
+.preset-chip:hover {
+  background: var(--muted);
+}
+
+.preset-chip.active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.settings-result {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.settings-result.ok {
+  color: var(--mint);
+}
+
+.settings-result.fail {
+  color: #8e2d28;
+}
+
+.about-meta {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.about-meta div {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.about-meta dt {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.about-meta dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.about-meta a {
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.about-meta a:hover {
+  text-decoration: underline;
+}
+
 .settings-section {
   display: grid;
   align-content: start;

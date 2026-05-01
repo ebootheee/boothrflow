@@ -409,3 +409,110 @@ pub async fn dictate_once(style: Style) -> Result<DictateResult, BoothError> {
         duration_ms: outcome.duration_ms,
     })
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Wave 4b polish — incoming from Casper's PR ideas
+// ────────────────────────────────────────────────────────────────────────
+
+/// 1-token "are you there" probe against the configured LLM endpoint.
+/// Returns latency on success; bubbles up the error string on failure so
+/// the UI can render either case inline. Uses the user's current settings,
+/// not env vars — so it tests what the user sees in the panel, not what
+/// the binary launched with.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct LlmTestResult {
+    pub ok: bool,
+    pub latency_ms: u64,
+    pub error: Option<String>,
+}
+
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+pub async fn llm_test_connection(
+    store: tauri::State<'_, settings::SettingsStore>,
+) -> Result<LlmTestResult, BoothError> {
+    use crate::llm::{CleanupRequest, LlmCleanup, OpenAiCompatLlmCleanup};
+    use std::time::Instant;
+    let app_settings = store.load()?;
+    let llm = app_settings.llm;
+    let started = Instant::now();
+    // Build a transient client from the live settings (not the daemon's
+    // cached one — the user may have changed values without restarting).
+    let probe = OpenAiCompatLlmCleanup::new(
+        llm.endpoint.clone(),
+        llm.model.clone(),
+        llm.api_key
+            .as_ref()
+            .filter(|k| !k.trim().is_empty())
+            .cloned(),
+    );
+    let probe = match probe {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(LlmTestResult {
+                ok: false,
+                latency_ms: started.elapsed().as_millis() as u64,
+                error: Some(e.to_string()),
+            });
+        }
+    };
+    let join_result: std::result::Result<crate::error::Result<()>, tokio::task::JoinError> =
+        tokio::task::spawn_blocking(move || {
+            probe
+                .cleanup(CleanupRequest {
+                    raw_text: "ping",
+                    style: crate::settings::Style::Raw,
+                    app_context: None,
+                })
+                .map(|_| ())
+        })
+        .await;
+    let latency_ms = started.elapsed().as_millis() as u64;
+    match join_result {
+        Ok(Ok(())) => Ok(LlmTestResult {
+            ok: true,
+            latency_ms,
+            error: None,
+        }),
+        Ok(Err(e)) => Ok(LlmTestResult {
+            ok: false,
+            latency_ms,
+            error: Some(e.to_string()),
+        }),
+        Err(e) => Ok(LlmTestResult {
+            ok: false,
+            latency_ms,
+            error: Some(e.to_string()),
+        }),
+    }
+}
+
+#[cfg(not(feature = "real-engines"))]
+#[tauri::command]
+pub async fn llm_test_connection() -> Result<LlmTestResult, BoothError> {
+    // Fakes-only build doesn't have the real HTTP client; pretend the
+    // probe worked so the FE smoke path still exercises this command.
+    Ok(LlmTestResult {
+        ok: true,
+        latency_ms: 0,
+        error: None,
+    })
+}
+
+/// App version reported by the Cargo manifest. Used by the About section.
+#[tauri::command]
+pub fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+/// Open a path (file or directory) in the OS file browser. Used by the
+/// About section's "reveal in Finder" links — model dir, history db.
+/// Falls through to `tauri-plugin-opener` so the same command works
+/// across macOS / Windows / Linux.
+#[tauri::command]
+pub async fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), BoothError> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|e| BoothError::internal(format!("reveal {path}: {e}")))
+}

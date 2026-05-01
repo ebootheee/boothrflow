@@ -128,18 +128,129 @@
   // panes on demand so the user isn't hunting through System Preferences.
   const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
   let micAvailable = $state<boolean | null>(null);
-  let permissionsOpen = $state(false);
   let permissionsDismissed = $state(false);
   let settingsOpen = $state(false);
   let settingsExportJson = $state("");
   let settingsImportJson = $state("");
   let capturingHotkey = $state<keyof HotkeySettings | null>(null);
 
+  // Sidebar nav for the Settings modal. Persists across opens so the user
+  // doesn't have to re-find their last section. Casper's PR #2 spec'd
+  // these five sections; we map our existing fields onto them.
+  type SettingsSection = "general" | "llm" | "whisper" | "history" | "about";
+  let activeSettingsSection = $state<SettingsSection>("general");
+
+  // Wave 4b polish surfaces — autostart toggle, LLM connection probe, and
+  // app metadata for the About section. Loaded on Settings open.
+  let autostartEnabled = $state<boolean | null>(null);
+  let autostartPending = $state(false);
+  let llmTestResult = $state<{ ok: boolean; latency_ms: number; error: string | null } | null>(
+    null,
+  );
+  let llmTestPending = $state(false);
+  let appVersion = $state<string | null>(null);
+
   const hotkeyRows: Array<{ key: keyof HotkeySettings; label: string }> = [
     { key: "ptt", label: "Push to talk" },
     { key: "toggle", label: "Toggle dictation" },
     { key: "quick_paste", label: "Quick paste" },
   ];
+
+  // LLM endpoint quick-fill chips. Selecting one fills endpoint and
+  // suggests a sensible model (current value preserved if non-default).
+  // Lifted from Casper's PR #2.
+  type LlmPreset = { id: string; label: string; endpoint: string; suggestedModel?: string };
+  const llmPresets: LlmPreset[] = [
+    {
+      id: "ollama",
+      label: "Ollama (local)",
+      endpoint: "http://localhost:11434/v1/chat/completions",
+      suggestedModel: "qwen2.5:7b",
+    },
+    {
+      id: "llama-server",
+      label: "llama.cpp server",
+      endpoint: "http://localhost:8080/v1/chat/completions",
+    },
+    {
+      id: "lm-studio",
+      label: "LM Studio",
+      endpoint: "http://localhost:1234/v1/chat/completions",
+    },
+    {
+      id: "openai",
+      label: "OpenAI",
+      endpoint: "https://api.openai.com/v1/chat/completions",
+      suggestedModel: "gpt-4o-mini",
+    },
+    {
+      id: "openrouter",
+      label: "OpenRouter",
+      endpoint: "https://openrouter.ai/api/v1/chat/completions",
+      suggestedModel: "qwen/qwen-2.5-7b-instruct",
+    },
+  ];
+
+  function applyLlmPreset(preset: LlmPreset) {
+    const next: Partial<LlmSettings> = { endpoint: preset.endpoint };
+    if (preset.suggestedModel) next.model = preset.suggestedModel;
+    updateLlm(next);
+  }
+
+  async function refreshAutostart() {
+    if (!inDesktop) return;
+    try {
+      autostartEnabled = await settings.getAutostartEnabled();
+    } catch {
+      autostartEnabled = null;
+    }
+  }
+
+  async function toggleAutostart(value: boolean) {
+    if (!inDesktop) return;
+    autostartPending = true;
+    try {
+      await settings.setAutostartEnabled(value);
+      autostartEnabled = value;
+    } catch (e) {
+      console.warn("setAutostartEnabled failed:", e);
+    } finally {
+      autostartPending = false;
+    }
+  }
+
+  async function runLlmTest() {
+    llmTestPending = true;
+    llmTestResult = null;
+    try {
+      llmTestResult = await settings.testLlmConnection();
+    } catch (e) {
+      llmTestResult = { ok: false, latency_ms: 0, error: String(e) };
+    } finally {
+      llmTestPending = false;
+    }
+  }
+
+  async function refreshAppVersion() {
+    if (!inDesktop) {
+      appVersion = "0.0.0-web";
+      return;
+    }
+    try {
+      appVersion = await settings.getAppVersion();
+    } catch {
+      appVersion = null;
+    }
+  }
+
+  // When the user opens Settings, populate the polish-section data once.
+  // Cheap calls; no spinner-glue needed.
+  $effect(() => {
+    if (settingsOpen) {
+      void refreshAutostart();
+      void refreshAppVersion();
+    }
+  });
 
   async function probeMicrophone() {
     if (!inDesktop) {
@@ -468,15 +579,6 @@
         <kbd title="Open quick-paste palette"
           ><Icon name="history" size={13} /> {quickPasteHotkey}</kbd
         >
-        {#if isMac && inDesktop}
-          <button
-            class="quiet-button"
-            type="button"
-            onclick={() => (permissionsOpen = !permissionsOpen)}
-          >
-            <Icon name="lock" size={13} /> Permissions
-          </button>
-        {/if}
         <button class="quiet-button" type="button" onclick={() => (settingsOpen = true)}>
           <Icon name="settings" size={13} /> Settings
         </button>
@@ -523,67 +625,6 @@
       </section>
     {/if}
 
-    {#if isMac && inDesktop && permissionsOpen}
-      <section class="panel permissions-panel" aria-labelledby="permissions-heading">
-        <div class="panel-head">
-          <div>
-            <span class="section-kicker">macOS</span>
-            <h2 id="permissions-heading">Permissions</h2>
-          </div>
-          <button class="quiet-button" type="button" onclick={() => (permissionsOpen = false)}
-            >Close</button
-          >
-        </div>
-        <p class="permissions-help">
-          boothrflow needs three permissions on macOS. Click each to open the relevant pane in
-          System Settings, toggle the switch for boothrflow (or for your terminal in dev), then
-          relaunch the app for the change to take effect.
-        </p>
-        <ol class="pipeline-list">
-          <li>
-            <span class="step-icon"><Icon name="mic" size={14} /></span>
-            <div>
-              <strong>Microphone</strong>
-              <small
-                >{micAvailable === false
-                  ? "Currently blocked — capture will fail"
-                  : "Used to capture your voice for dictation"}</small
-              >
-            </div>
-            <button
-              class="quiet-button"
-              type="button"
-              onclick={() => void openPermissionPane("microphone")}>Open</button
-            >
-          </li>
-          <li>
-            <span class="step-icon"><Icon name="zap" size={14} /></span>
-            <div>
-              <strong>Accessibility</strong>
-              <small>Used to paste the transcript into the focused application</small>
-            </div>
-            <button
-              class="quiet-button"
-              type="button"
-              onclick={() => void openPermissionPane("accessibility")}>Open</button
-            >
-          </li>
-          <li>
-            <span class="step-icon"><Icon name="command" size={14} /></span>
-            <div>
-              <strong>Input Monitoring</strong>
-              <small>Required for the global push-to-talk hotkey to fire when unfocused</small>
-            </div>
-            <button
-              class="quiet-button"
-              type="button"
-              onclick={() => void openPermissionPane("input_monitoring")}>Open</button
-            >
-          </li>
-        </ol>
-      </section>
-    {/if}
-
     {#if settingsOpen}
       <div class="settings-backdrop">
         <div
@@ -620,234 +661,439 @@
             <div class="inline-error">{settings.error}</div>
           {/if}
 
-          <div class="settings-grid">
-            <section class="settings-section">
-              <div class="settings-section-head">
-                <span class="step-icon"><Icon name="mic" size={14} /></span>
-                <div>
-                  <span class="section-kicker">Voice</span>
-                  <h3>Recognition</h3>
-                </div>
-              </div>
+          <div class="settings-shell">
+            <aside class="settings-sidebar" aria-label="Settings sections">
+              <button
+                type="button"
+                class="settings-nav-item"
+                class:active={activeSettingsSection === "general"}
+                onclick={() => (activeSettingsSection = "general")}
+                ><Icon name="settings" size={14} /> General</button
+              >
+              <button
+                type="button"
+                class="settings-nav-item"
+                class:active={activeSettingsSection === "llm"}
+                onclick={() => (activeSettingsSection = "llm")}
+                ><Icon name="brain" size={14} /> LLM</button
+              >
+              <button
+                type="button"
+                class="settings-nav-item"
+                class:active={activeSettingsSection === "whisper"}
+                onclick={() => (activeSettingsSection = "whisper")}
+                ><Icon name="mic" size={14} /> Whisper</button
+              >
+              <button
+                type="button"
+                class="settings-nav-item"
+                class:active={activeSettingsSection === "history"}
+                onclick={() => (activeSettingsSection = "history")}
+                ><Icon name="database" size={14} /> History</button
+              >
+              <button
+                type="button"
+                class="settings-nav-item"
+                class:active={activeSettingsSection === "about"}
+                onclick={() => (activeSettingsSection = "about")}
+                ><Icon name="info" size={14} /> About</button
+              >
+            </aside>
 
-              <label class="settings-field">
-                <span>Whisper model</span>
-                <select
-                  value={settings.current.whisper.model}
-                  onchange={(event) => void settings.setWhisperModel(event.currentTarget.value)}
-                >
-                  {#each settings.options.whisper_models as option (option.value)}
-                    <option value={option.value}
-                      >{option.label}{option.value === settings.current.whisper.model
-                        ? " (active)"
-                        : ""}</option
+            <div class="settings-content">
+              {#if activeSettingsSection === "general"}
+                <section class="settings-section">
+                  <div class="settings-section-head">
+                    <span class="step-icon"><Icon name="pen" size={14} /></span>
+                    <div>
+                      <span class="section-kicker">Style</span>
+                      <h3>Default style</h3>
+                    </div>
+                  </div>
+                  <label class="settings-field">
+                    <span>Style</span>
+                    <select
+                      value={settings.style}
+                      onchange={(event) => selectStyle(event.currentTarget.value as Style)}
                     >
-                  {/each}
-                </select>
-                <small
-                  >{modelDetail(
-                    settings.options.whisper_models,
-                    settings.current.whisper.model,
-                  )}</small
-                >
-              </label>
-
-              <label class="settings-field">
-                <span>Vocabulary</span>
-                <textarea
-                  rows="5"
-                  value={settings.current.vocabulary}
-                  placeholder="kubernetes, terraform, GraphQL"
-                  oninput={(event) =>
-                    void settings.update({ vocabulary: event.currentTarget.value })}
-                ></textarea>
-              </label>
-            </section>
-
-            <section class="settings-section">
-              <div class="settings-section-head">
-                <span class="step-icon"><Icon name="brain" size={14} /></span>
-                <div>
-                  <span class="section-kicker">Cleanup</span>
-                  <h3>LLM</h3>
-                </div>
-              </div>
-
-              <label class="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={settings.current.llm.enabled}
-                  onchange={(event) => updateLlm({ enabled: event.currentTarget.checked })}
-                />
-                <span>LLM cleanup</span>
-              </label>
-
-              <label class="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={settings.current.privacy_mode}
-                  onchange={(event) =>
-                    void settings.update({ privacy_mode: event.currentTarget.checked })}
-                />
-                <span>Privacy mode</span>
-              </label>
-
-              <label class="settings-field">
-                <span>Model</span>
-                <select
-                  value={settings.current.llm.model}
-                  onchange={(event) => updateLlm({ model: event.currentTarget.value })}
-                >
-                  {#each settings.options.llm_models as option (option.value)}
-                    <option value={option.value}
-                      >{option.label}{option.value === settings.current.llm.model
-                        ? " (active)"
-                        : ""}</option
-                    >
-                  {/each}
-                </select>
-                <small>{modelDetail(settings.options.llm_models, settings.current.llm.model)}</small
-                >
-              </label>
-
-              <label class="settings-field">
-                <span>Endpoint</span>
-                <input
-                  value={settings.current.llm.endpoint}
-                  oninput={(event) => updateLlm({ endpoint: event.currentTarget.value })}
-                />
-              </label>
-
-              <label class="settings-field">
-                <span>API key</span>
-                <input
-                  type="password"
-                  value={settings.current.llm.api_key ?? ""}
-                  oninput={(event) => updateLlm({ api_key: event.currentTarget.value || null })}
-                />
-              </label>
-            </section>
-
-            <section class="settings-section">
-              <div class="settings-section-head">
-                <span class="step-icon"><Icon name="key" size={14} /></span>
-                <div>
-                  <span class="section-kicker">Input</span>
-                  <h3>Hotkeys</h3>
-                </div>
-              </div>
-
-              {#each hotkeyRows as row (row.key)}
-                <label class="settings-field">
-                  <span>{row.label}</span>
-                  <div class="hotkey-capture">
+                      {#each styleOptions as option (option.value)}
+                        <option value={option.value}>{option.label}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  <label class="toggle-row">
                     <input
-                      value={settings.current.hotkeys[row.key]}
-                      oninput={(event) => updateHotkey(row.key, event.currentTarget.value)}
+                      type="checkbox"
+                      checked={settings.current.privacy_mode}
+                      onchange={(event) =>
+                        void settings.update({ privacy_mode: event.currentTarget.checked })}
                     />
+                    <span>Privacy mode</span>
+                  </label>
+                </section>
+
+                <section class="settings-section">
+                  <div class="settings-section-head">
+                    <span class="step-icon"><Icon name="key" size={14} /></span>
+                    <div>
+                      <span class="section-kicker">Input</span>
+                      <h3>Hotkeys</h3>
+                    </div>
+                  </div>
+                  {#each hotkeyRows as row (row.key)}
+                    <label class="settings-field">
+                      <span>{row.label}</span>
+                      <div class="hotkey-capture">
+                        <input
+                          value={settings.current.hotkeys[row.key]}
+                          oninput={(event) => updateHotkey(row.key, event.currentTarget.value)}
+                        />
+                        <button
+                          class="quiet-button"
+                          type="button"
+                          onclick={() => (capturingHotkey = row.key)}
+                        >
+                          {capturingHotkey === row.key ? "Press keys" : "Capture"}
+                        </button>
+                      </div>
+                    </label>
+                  {/each}
+                </section>
+
+                {#if inDesktop}
+                  <section class="settings-section">
+                    <div class="settings-section-head">
+                      <span class="step-icon"><Icon name="zap" size={14} /></span>
+                      <div>
+                        <span class="section-kicker">Startup</span>
+                        <h3>Launch at login</h3>
+                      </div>
+                    </div>
+                    <label class="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={autostartEnabled === true}
+                        disabled={autostartPending || autostartEnabled === null}
+                        onchange={(event) => void toggleAutostart(event.currentTarget.checked)}
+                      />
+                      <span
+                        >Start boothrflow when I log in{autostartEnabled === null
+                          ? " (probing)"
+                          : ""}</span
+                      >
+                    </label>
+                  </section>
+                {/if}
+
+                {#if isMac && inDesktop}
+                  <section class="settings-section">
+                    <div class="settings-section-head">
+                      <span class="step-icon"><Icon name="lock" size={14} /></span>
+                      <div>
+                        <span class="section-kicker">macOS</span>
+                        <h3>Permissions</h3>
+                      </div>
+                    </div>
+                    <p class="settings-help">
+                      boothrflow needs three permissions on macOS. Click each to open the relevant
+                      pane in System Settings, toggle the switch, then relaunch.
+                    </p>
+                    <ol class="permission-list">
+                      <li>
+                        <div>
+                          <strong>Microphone</strong>
+                          <small
+                            >{micAvailable === false
+                              ? "Currently blocked — capture will fail"
+                              : "Audio capture"}</small
+                          >
+                        </div>
+                        <button
+                          class="quiet-button"
+                          type="button"
+                          onclick={() => void openPermissionPane("microphone")}>Open</button
+                        >
+                      </li>
+                      <li>
+                        <div>
+                          <strong>Accessibility</strong>
+                          <small>Paste into the focused application</small>
+                        </div>
+                        <button
+                          class="quiet-button"
+                          type="button"
+                          onclick={() => void openPermissionPane("accessibility")}>Open</button
+                        >
+                      </li>
+                      <li>
+                        <div>
+                          <strong>Input Monitoring</strong>
+                          <small>Global hotkey when boothrflow isn't focused</small>
+                        </div>
+                        <button
+                          class="quiet-button"
+                          type="button"
+                          onclick={() => void openPermissionPane("input_monitoring")}>Open</button
+                        >
+                      </li>
+                    </ol>
+                  </section>
+                {/if}
+              {:else if activeSettingsSection === "llm"}
+                <section class="settings-section">
+                  <div class="settings-section-head">
+                    <span class="step-icon"><Icon name="brain" size={14} /></span>
+                    <div>
+                      <span class="section-kicker">Cleanup</span>
+                      <h3>LLM</h3>
+                    </div>
+                  </div>
+
+                  <label class="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.current.llm.enabled}
+                      onchange={(event) => updateLlm({ enabled: event.currentTarget.checked })}
+                    />
+                    <span>LLM cleanup</span>
+                  </label>
+
+                  <div class="preset-chips" aria-label="LLM endpoint presets">
+                    <span class="preset-chips-label">Presets</span>
+                    {#each llmPresets as preset (preset.id)}
+                      <button
+                        type="button"
+                        class="preset-chip"
+                        class:active={settings.current.llm.endpoint === preset.endpoint}
+                        onclick={() => applyLlmPreset(preset)}
+                      >
+                        {preset.label}
+                      </button>
+                    {/each}
+                  </div>
+
+                  <label class="settings-field">
+                    <span>Endpoint</span>
+                    <input
+                      value={settings.current.llm.endpoint}
+                      oninput={(event) => updateLlm({ endpoint: event.currentTarget.value })}
+                    />
+                  </label>
+
+                  <label class="settings-field">
+                    <span>Model</span>
+                    <select
+                      value={settings.current.llm.model}
+                      onchange={(event) => updateLlm({ model: event.currentTarget.value })}
+                    >
+                      {#each settings.options.llm_models as option (option.value)}
+                        <option value={option.value}
+                          >{option.label}{option.value === settings.current.llm.model
+                            ? " (active)"
+                            : ""}</option
+                        >
+                      {/each}
+                    </select>
+                    <small
+                      >{modelDetail(settings.options.llm_models, settings.current.llm.model)}</small
+                    >
+                  </label>
+
+                  <label class="settings-field">
+                    <span>API key</span>
+                    <input
+                      type="password"
+                      value={settings.current.llm.api_key ?? ""}
+                      placeholder="Stored in OS keychain when available"
+                      oninput={(event) => updateLlm({ api_key: event.currentTarget.value || null })}
+                    />
+                  </label>
+
+                  <div class="settings-actions">
                     <button
                       class="quiet-button"
                       type="button"
-                      onclick={() => (capturingHotkey = row.key)}
+                      disabled={llmTestPending}
+                      onclick={() => void runLlmTest()}
                     >
-                      {capturingHotkey === row.key ? "Press keys" : "Capture"}
+                      {llmTestPending ? "Testing…" : "Test connection"}
+                    </button>
+                    {#if llmTestResult}
+                      {#if llmTestResult.ok}
+                        <span class="settings-result ok">OK · {llmTestResult.latency_ms} ms</span>
+                      {:else}
+                        <span class="settings-result fail">{llmTestResult.error ?? "Failed"}</span>
+                      {/if}
+                    {/if}
+                  </div>
+                </section>
+              {:else if activeSettingsSection === "whisper"}
+                <section class="settings-section">
+                  <div class="settings-section-head">
+                    <span class="step-icon"><Icon name="mic" size={14} /></span>
+                    <div>
+                      <span class="section-kicker">Voice</span>
+                      <h3>Recognition</h3>
+                    </div>
+                  </div>
+
+                  <label class="settings-field">
+                    <span>Whisper model</span>
+                    <select
+                      value={settings.current.whisper.model}
+                      onchange={(event) => void settings.setWhisperModel(event.currentTarget.value)}
+                    >
+                      {#each settings.options.whisper_models as option (option.value)}
+                        <option value={option.value}
+                          >{option.label}{option.value === settings.current.whisper.model
+                            ? " (active)"
+                            : ""}</option
+                        >
+                      {/each}
+                    </select>
+                    <small
+                      >{modelDetail(
+                        settings.options.whisper_models,
+                        settings.current.whisper.model,
+                      )}</small
+                    >
+                  </label>
+
+                  <label class="settings-field">
+                    <span>Vocabulary</span>
+                    <textarea
+                      rows="6"
+                      value={settings.current.vocabulary}
+                      placeholder="kubernetes, terraform, GraphQL — comma-separated proper nouns + jargon."
+                      oninput={(event) =>
+                        void settings.update({ vocabulary: event.currentTarget.value })}
+                    ></textarea>
+                    <small
+                      >Appended to Whisper's initial prompt — biases recognition toward these terms.</small
+                    >
+                  </label>
+                </section>
+              {:else if activeSettingsSection === "history"}
+                <section class="settings-section">
+                  <div class="settings-section-head">
+                    <span class="step-icon"><Icon name="database" size={14} /></span>
+                    <div>
+                      <span class="section-kicker">Memory</span>
+                      <h3>Embeddings</h3>
+                    </div>
+                  </div>
+
+                  <label class="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.current.embed.enabled}
+                      onchange={(event) => updateEmbed({ enabled: event.currentTarget.checked })}
+                    />
+                    <span>History embeddings</span>
+                  </label>
+
+                  <label class="settings-field">
+                    <span>Model</span>
+                    <select
+                      value={settings.current.embed.model}
+                      onchange={(event) => updateEmbed({ model: event.currentTarget.value })}
+                    >
+                      {#each settings.options.embed_models as option (option.value)}
+                        <option value={option.value}>{option.label}</option>
+                      {/each}
+                    </select>
+                  </label>
+
+                  <label class="settings-field">
+                    <span>Endpoint</span>
+                    <input
+                      value={settings.current.embed.endpoint}
+                      oninput={(event) => updateEmbed({ endpoint: event.currentTarget.value })}
+                    />
+                  </label>
+
+                  <label class="settings-field">
+                    <span>API key</span>
+                    <input
+                      type="password"
+                      value={settings.current.embed.api_key ?? ""}
+                      placeholder="Stored in OS keychain when available"
+                      oninput={(event) =>
+                        updateEmbed({ api_key: event.currentTarget.value || null })}
+                    />
+                  </label>
+                </section>
+              {:else if activeSettingsSection === "about"}
+                <section class="settings-section">
+                  <div class="settings-section-head">
+                    <span class="step-icon"><Icon name="info" size={14} /></span>
+                    <div>
+                      <span class="section-kicker">About</span>
+                      <h3>boothrflow</h3>
+                    </div>
+                  </div>
+                  <dl class="about-meta">
+                    <div>
+                      <dt>Version</dt>
+                      <dd>{appVersion ?? "…"}</dd>
+                    </div>
+                    <div>
+                      <dt>Repo</dt>
+                      <dd>
+                        <a
+                          href="https://github.com/ebootheee/boothrflow"
+                          target="_blank"
+                          rel="noopener">github.com/ebootheee/boothrflow</a
+                        >
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>License</dt>
+                      <dd>Apache-2.0</dd>
+                    </div>
+                  </dl>
+                </section>
+
+                <section class="settings-section">
+                  <div class="settings-section-head">
+                    <span class="step-icon"><Icon name="server" size={14} /></span>
+                    <div>
+                      <span class="section-kicker">Portable</span>
+                      <h3>Import / Export</h3>
+                    </div>
+                  </div>
+
+                  <div class="settings-actions">
+                    <button
+                      class="quiet-button"
+                      type="button"
+                      onclick={() => void exportSettings()}
+                    >
+                      <Icon name="download" size={13} /> Export
+                    </button>
+                    <button
+                      class="quiet-button"
+                      type="button"
+                      onclick={() => void importSettings()}
+                    >
+                      <Icon name="upload" size={13} /> Import
                     </button>
                   </div>
-                </label>
-              {/each}
-            </section>
-
-            <section class="settings-section">
-              <div class="settings-section-head">
-                <span class="step-icon"><Icon name="database" size={14} /></span>
-                <div>
-                  <span class="section-kicker">Memory</span>
-                  <h3>Embeddings</h3>
-                </div>
-              </div>
-
-              <label class="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={settings.current.embed.enabled}
-                  onchange={(event) => updateEmbed({ enabled: event.currentTarget.checked })}
-                />
-                <span>History embeddings</span>
-              </label>
-
-              <label class="settings-field">
-                <span>Model</span>
-                <select
-                  value={settings.current.embed.model}
-                  onchange={(event) => updateEmbed({ model: event.currentTarget.value })}
-                >
-                  {#each settings.options.embed_models as option (option.value)}
-                    <option value={option.value}>{option.label}</option>
-                  {/each}
-                </select>
-              </label>
-
-              <label class="settings-field">
-                <span>Endpoint</span>
-                <input
-                  value={settings.current.embed.endpoint}
-                  oninput={(event) => updateEmbed({ endpoint: event.currentTarget.value })}
-                />
-              </label>
-            </section>
-
-            <section class="settings-section">
-              <div class="settings-section-head">
-                <span class="step-icon"><Icon name="pen" size={14} /></span>
-                <div>
-                  <span class="section-kicker">Styles</span>
-                  <h3>Overrides</h3>
-                </div>
-              </div>
-              <label class="settings-field">
-                <span>Default style</span>
-                <select
-                  value={settings.style}
-                  onchange={(event) => selectStyle(event.currentTarget.value as Style)}
-                >
-                  {#each styleOptions as option (option.value)}
-                    <option value={option.value}>{option.label}</option>
-                  {/each}
-                </select>
-              </label>
-              <div class="empty-panel compact-empty">No app overrides</div>
-            </section>
-
-            <section class="settings-section">
-              <div class="settings-section-head">
-                <span class="step-icon"><Icon name="server" size={14} /></span>
-                <div>
-                  <span class="section-kicker">Portable</span>
-                  <h3>Import / Export</h3>
-                </div>
-              </div>
-
-              <div class="settings-actions">
-                <button class="quiet-button" type="button" onclick={() => void exportSettings()}>
-                  <Icon name="download" size={13} /> Export
-                </button>
-                <button class="quiet-button" type="button" onclick={() => void importSettings()}>
-                  <Icon name="upload" size={13} /> Import
-                </button>
-              </div>
-              <label class="settings-field">
-                <span>JSON</span>
-                <textarea
-                  rows="5"
-                  value={settingsExportJson || settingsImportJson}
-                  placeholder="boothrflow.settings.json"
-                  oninput={(event) => {
-                    settingsExportJson = "";
-                    settingsImportJson = event.currentTarget.value;
-                  }}
-                ></textarea>
-              </label>
-            </section>
+                  <label class="settings-field">
+                    <span>JSON</span>
+                    <textarea
+                      rows="5"
+                      value={settingsExportJson || settingsImportJson}
+                      placeholder="boothrflow.settings.json"
+                      oninput={(event) => {
+                        settingsExportJson = "";
+                        settingsImportJson = event.currentTarget.value;
+                      }}
+                    ></textarea>
+                  </label>
+                </section>
+              {/if}
+            </div>
           </div>
         </div>
       </div>
