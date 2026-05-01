@@ -75,6 +75,12 @@ impl HistoryStore {
     /// Open or create the history database in `%APPDATA%/boothrflow/history.db`,
     /// run migrations, and bring up the embedding client (best-effort).
     pub fn open_default() -> Result<Self> {
+        Self::open_default_with_settings(&crate::settings::current_app_settings().embed)
+    }
+
+    pub fn open_default_with_settings(
+        embed_settings: &crate::settings::EmbedSettings,
+    ) -> Result<Self> {
         let db_path = default_db_path()
             .ok_or_else(|| BoothError::internal("could not resolve user data dir"))?;
         if let Some(parent) = db_path.parent() {
@@ -98,9 +104,9 @@ impl HistoryStore {
             .to_latest(&mut conn)
             .map_err(|e| BoothError::internal(format!("migrate: {e}")))?;
 
-        let embedder = match EmbeddingClient::from_env() {
+        let embedder = match EmbeddingClient::from_settings(embed_settings) {
             None => {
-                tracing::info!("history: embedding disabled (BOOTHRFLOW_HISTORY_DISABLED)");
+                tracing::info!("history: embedding disabled");
                 None
             }
             Some(Ok(client)) => {

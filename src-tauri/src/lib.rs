@@ -32,9 +32,10 @@ pub mod tray;
 pub mod vad;
 
 use commands::{
-    dictate_once, microphone_available, open_macos_setting, set_dictation_style, whisper_model_name,
+    dictate_once, microphone_available, open_macos_setting, set_dictation_style, settings_export,
+    settings_get, settings_import, settings_options, settings_update, whisper_download_model,
+    whisper_model_name,
 };
-#[cfg(feature = "real-engines")]
 use tauri::Manager;
 use tauri::WindowEvent;
 
@@ -56,20 +57,6 @@ pub fn run() {
         )
         .with_target(false)
         .init();
-
-    // tauri_plugin_log is intentionally not registered: we already init
-    // tracing_subscriber above as the global logger, and registering
-    // tauri-plugin-log on top panics with "logger after the logging system
-    // was already initialized". Tauri 2 emits via the `tracing` crate so
-    // its internal events flow through our subscriber anyway.
-    #[cfg(feature = "real-engines")]
-    let history = match history::HistoryStore::open_default() {
-        Ok(h) => Some(Arc::new(h)),
-        Err(e) => {
-            tracing::error!("history: open failed, persistence disabled: {e}");
-            None
-        }
-    };
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -113,6 +100,12 @@ pub fn run() {
             open_macos_setting,
             microphone_available,
             whisper_model_name,
+            settings_get,
+            settings_update,
+            settings_options,
+            settings_export,
+            settings_import,
+            whisper_download_model,
         ]);
     }
     #[cfg(not(feature = "real-engines"))]
@@ -123,11 +116,20 @@ pub fn run() {
             open_macos_setting,
             microphone_available,
             whisper_model_name,
+            settings_get,
+            settings_update,
+            settings_options,
+            settings_export,
+            settings_import,
+            whisper_download_model,
         ]);
     }
     builder
-        .setup(move |app| {
+        .setup(|app| {
             let handle = app.handle().clone();
+
+            let settings_store = settings::SettingsStore::open(&handle)?;
+            app.manage(settings_store.clone());
 
             // System tray with Open / Pause / Quit menu.
             if let Err(e) = tray::create_tray(&handle) {
@@ -161,8 +163,19 @@ pub fn run() {
 
             // Make the history store available to Tauri commands.
             #[cfg(feature = "real-engines")]
-            if let Some(history) = history.clone() {
-                app.manage(history);
+            let history = match history::HistoryStore::open_default_with_settings(
+                &settings::current_app_settings().embed,
+            ) {
+                Ok(h) => Some(Arc::new(h)),
+                Err(e) => {
+                    tracing::error!("history: open failed, persistence disabled: {e}");
+                    None
+                }
+            };
+
+            #[cfg(feature = "real-engines")]
+            if let Some(history_store) = history.clone() {
+                app.manage(history_store);
             }
 
             // Real-engines: spawn the hotkey daemon and bridge events to

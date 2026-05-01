@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{BoothError, Result};
 use crate::llm::{stardate_label, CleanupOutput, CleanupRequest, LlmCleanup};
-use crate::settings::Style;
+use crate::settings::{LlmSettings, Style};
 
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:11434/v1/chat/completions";
 pub const DEFAULT_MODEL: &str = "qwen2.5:7b";
@@ -76,6 +76,22 @@ impl OpenAiCompatLlmCleanup {
         let model = std::env::var("BOOTHRFLOW_LLM_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into());
         let api_key = std::env::var("BOOTHRFLOW_LLM_API_KEY").ok();
         Some(Self::new(endpoint, model, api_key))
+    }
+
+    pub fn from_settings(settings: &LlmSettings) -> Option<Result<Self>> {
+        if !settings.enabled {
+            return None;
+        }
+        let api_key = settings
+            .api_key
+            .as_ref()
+            .filter(|key| !key.trim().is_empty())
+            .cloned();
+        Some(Self::new(
+            settings.endpoint.clone(),
+            settings.model.clone(),
+            api_key,
+        ))
     }
 
     pub fn endpoint(&self) -> &str {

@@ -10,7 +10,13 @@
   } from "$lib/services/platform";
   import type { Style } from "$lib/services/styles";
   import { dictationStore } from "$lib/state/dictation.svelte";
-  import { settings } from "$lib/state/settings.svelte";
+  import {
+    settings,
+    type EmbedSettings,
+    type HotkeySettings,
+    type LlmSettings,
+    type ModelOption,
+  } from "$lib/state/settings.svelte";
 
   type HistoryEntry = {
     id: number;
@@ -37,9 +43,16 @@
   const isPill = hash === "#listen-pill";
   const isQuickPaste = hash === "#quick-paste";
   const inDesktop = isTauri();
-  const dictationHotkey = dictationHotkeyLabel();
-  const quickPasteHotkey = quickPasteHotkeyLabel();
-  const toggleDictationHotkey = toggleDictationHotkeyLabel();
+  const defaultDictationHotkey = dictationHotkeyLabel();
+  const defaultQuickPasteHotkey = quickPasteHotkeyLabel();
+  const defaultToggleDictationHotkey = toggleDictationHotkeyLabel();
+  const dictationHotkey = $derived(settings.current.hotkeys.ptt || defaultDictationHotkey);
+  const quickPasteHotkey = $derived(
+    settings.current.hotkeys.quick_paste || defaultQuickPasteHotkey,
+  );
+  const toggleDictationHotkey = $derived(
+    settings.current.hotkeys.toggle || defaultToggleDictationHotkey,
+  );
 
   const styleOptions: Array<{ value: Style; label: string; icon: IconName }> = [
     { value: "casual", label: "Casual", icon: "pen" },
@@ -117,6 +130,16 @@
   let micAvailable = $state<boolean | null>(null);
   let permissionsOpen = $state(false);
   let permissionsDismissed = $state(false);
+  let settingsOpen = $state(false);
+  let settingsExportJson = $state("");
+  let settingsImportJson = $state("");
+  let capturingHotkey = $state<keyof HotkeySettings | null>(null);
+
+  const hotkeyRows: Array<{ key: keyof HotkeySettings; label: string }> = [
+    { key: "ptt", label: "Push to talk" },
+    { key: "toggle", label: "Toggle dictation" },
+    { key: "quick_paste", label: "Quick paste" },
+  ];
 
   async function probeMicrophone() {
     if (!inDesktop) {
@@ -131,20 +154,7 @@
     }
   }
 
-  let whisperModel = $state("ggml-tiny.en");
-  async function probeWhisperModel() {
-    if (!inDesktop) return;
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      whisperModel = await invoke<string>("whisper_model_name");
-    } catch {
-      // Stay on the default label.
-    }
-  }
-  function whisperLabel(name: string): string {
-    // ggml-tiny.en → "tiny.en", ggml-large-v3-turbo → "large-v3-turbo"
-    return name.replace(/^ggml-/, "");
-  }
+  const whisperModel = $derived(settings.current.whisper.model);
 
   type PermissionPane = "microphone" | "accessibility" | "input_monitoring";
   async function openPermissionPane(pane: PermissionPane) {
@@ -154,6 +164,92 @@
       await invoke("open_macos_setting", { pane });
     } catch (e) {
       console.warn("open_macos_setting failed:", e);
+    }
+  }
+
+  function optionFor(options: ModelOption[], value: string): ModelOption | null {
+    return options.find((option) => option.value === value) ?? null;
+  }
+
+  function modelLabel(options: ModelOption[], value: string): string {
+    return optionFor(options, value)?.label ?? value;
+  }
+
+  function modelDetail(options: ModelOption[], value: string): string {
+    return optionFor(options, value)?.detail ?? "";
+  }
+
+  function updateLlm(patch: Partial<LlmSettings>) {
+    void settings.update({ llm: { ...settings.current.llm, ...patch } });
+  }
+
+  function updateEmbed(patch: Partial<EmbedSettings>) {
+    void settings.update({ embed: { ...settings.current.embed, ...patch } });
+  }
+
+  function updateHotkey(key: keyof HotkeySettings, value: string) {
+    void settings.update({ hotkeys: { ...settings.current.hotkeys, [key]: value } });
+  }
+
+  function captureChord(event: KeyboardEvent) {
+    if (!capturingHotkey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      capturingHotkey = null;
+      return;
+    }
+    const chord = chordFromEvent(event);
+    if (!chord) return;
+    updateHotkey(capturingHotkey, chord);
+    capturingHotkey = null;
+  }
+
+  function chordFromEvent(event: KeyboardEvent): string | null {
+    const parts: string[] = [];
+    if (event.ctrlKey) parts.push("Ctrl");
+    if (event.altKey) parts.push(isMac ? "Option" : "Alt");
+    if (event.shiftKey) parts.push("Shift");
+    if (event.metaKey) parts.push(isMac ? "Cmd" : "Win");
+
+    const key = normalizedEventKey(event);
+    if (key && !["Ctrl", "Option", "Alt", "Shift", "Cmd", "Win"].includes(key)) {
+      parts.push(key);
+    }
+
+    return parts.length >= 2 ? parts.join(" + ") : null;
+  }
+
+  function normalizedEventKey(event: KeyboardEvent): string | null {
+    if (event.key === " ") return "Space";
+    if (event.key.length === 1) return event.key.toUpperCase();
+    const key = event.key.toLowerCase();
+    if (key === "control") return "Ctrl";
+    if (key === "meta") return isMac ? "Cmd" : "Win";
+    if (key === "alt") return isMac ? "Option" : "Alt";
+    if (key === "shift") return "Shift";
+    if (key === "escape") return "Escape";
+    if (key === "enter") return "Enter";
+    if (key === "tab") return "Tab";
+    if (key === "spacebar") return "Space";
+    return event.key;
+  }
+
+  async function exportSettings() {
+    try {
+      settingsExportJson = await settings.exportJson();
+    } catch (error) {
+      console.warn("settings export failed:", error);
+    }
+  }
+
+  async function importSettings() {
+    if (!settingsImportJson.trim()) return;
+    try {
+      await settings.importJson(settingsImportJson);
+      settingsImportJson = "";
+    } catch (error) {
+      console.warn("settings import failed:", error);
     }
   }
 
@@ -180,16 +276,22 @@
   const totalMs = $derived(sttMs + llmMs);
   // "0 ms" is ambiguous — distinguish skipped (raw / short / disabled) from
   // failed (Ollama unreachable) so the UI doesn't read like a regression.
-  const llmStatus = $derived<"ran" | "skipped-raw" | "skipped-short" | "unreachable" | "idle">(
+  const llmStatus = $derived<
+    "ran" | "skipped-raw" | "skipped-short" | "unreachable" | "disabled" | "privacy" | "idle"
+  >(
     dictationStore.llmMissing
       ? "unreachable"
-      : settings.style === "raw"
-        ? "skipped-raw"
-        : llmMs > 0
-          ? "ran"
-          : dictationStore.lastDone
-            ? "skipped-short"
-            : "idle",
+      : settings.privacyMode
+        ? "privacy"
+        : !settings.llmEnabled
+          ? "disabled"
+          : settings.style === "raw"
+            ? "skipped-raw"
+            : llmMs > 0
+              ? "ran"
+              : dictationStore.lastDone
+                ? "skipped-short"
+                : "idle",
   );
   function llmDisplay(): string {
     switch (llmStatus) {
@@ -206,6 +308,10 @@
         return "skipped";
       case "unreachable":
         return "unreachable";
+      case "disabled":
+        return "off";
+      case "privacy":
+        return "privacy";
       case "idle":
       default:
         return llmMs ? formatMs(llmMs) : "0 ms";
@@ -226,9 +332,13 @@
   );
 
   const cleanupModel = $derived(
-    settings.style === "raw" ? "Bypass" : "Qwen 2.5 / OpenAI-compatible",
+    settings.privacyMode || !settings.llmEnabled || settings.style === "raw"
+      ? "Bypass"
+      : settings.current.llm.model,
   );
-  const embeddingModel = $derived(displayStats?.embed_model ?? "Off");
+  const embeddingModel = $derived(
+    settings.current.embed.enabled ? settings.current.embed.model : "Off",
+  );
 
   async function loadHistory() {
     if (!inDesktop) {
@@ -301,10 +411,10 @@
   }
 
   onMount(() => {
+    void settings.load();
     void dictationStore.attach();
     void loadHistory();
     void probeMicrophone();
-    void probeWhisperModel();
   });
 
   // Refresh history whenever a fresh dictation completes so the new entry
@@ -323,6 +433,8 @@
     });
   });
 </script>
+
+<svelte:window onkeydown={captureChord} />
 
 {#if isPill}
   <ListenPill />
@@ -365,6 +477,9 @@
             <Icon name="lock" size={13} /> Permissions
           </button>
         {/if}
+        <button class="quiet-button" type="button" onclick={() => (settingsOpen = true)}>
+          <Icon name="settings" size={13} /> Settings
+        </button>
       </div>
     </header>
 
@@ -469,6 +584,275 @@
       </section>
     {/if}
 
+    {#if settingsOpen}
+      <div class="settings-backdrop">
+        <div
+          class="settings-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-heading"
+        >
+          <div class="settings-titlebar">
+            <div>
+              <span class="section-kicker">Wave 4B</span>
+              <h2 id="settings-heading">Settings</h2>
+            </div>
+            <div class="settings-status">
+              {#if settings.saving}
+                <span>Saving</span>
+              {:else if settings.downloadStatus}
+                <span>{settings.downloadStatus}</span>
+              {:else}
+                <span>Saved</span>
+              {/if}
+              <button
+                class="icon-button"
+                type="button"
+                aria-label="Close settings"
+                onclick={() => (settingsOpen = false)}
+              >
+                <Icon name="x" size={15} />
+              </button>
+            </div>
+          </div>
+
+          {#if settings.error}
+            <div class="inline-error">{settings.error}</div>
+          {/if}
+
+          <div class="settings-grid">
+            <section class="settings-section">
+              <div class="settings-section-head">
+                <span class="step-icon"><Icon name="mic" size={14} /></span>
+                <div>
+                  <span class="section-kicker">Voice</span>
+                  <h3>Recognition</h3>
+                </div>
+              </div>
+
+              <label class="settings-field">
+                <span>Whisper model</span>
+                <select
+                  value={settings.current.whisper.model}
+                  onchange={(event) => void settings.setWhisperModel(event.currentTarget.value)}
+                >
+                  {#each settings.options.whisper_models as option (option.value)}
+                    <option value={option.value}
+                      >{option.label}{option.value === settings.current.whisper.model
+                        ? " (active)"
+                        : ""}</option
+                    >
+                  {/each}
+                </select>
+                <small
+                  >{modelDetail(
+                    settings.options.whisper_models,
+                    settings.current.whisper.model,
+                  )}</small
+                >
+              </label>
+
+              <label class="settings-field">
+                <span>Vocabulary</span>
+                <textarea
+                  rows="5"
+                  value={settings.current.vocabulary}
+                  placeholder="kubernetes, terraform, GraphQL"
+                  oninput={(event) =>
+                    void settings.update({ vocabulary: event.currentTarget.value })}
+                ></textarea>
+              </label>
+            </section>
+
+            <section class="settings-section">
+              <div class="settings-section-head">
+                <span class="step-icon"><Icon name="brain" size={14} /></span>
+                <div>
+                  <span class="section-kicker">Cleanup</span>
+                  <h3>LLM</h3>
+                </div>
+              </div>
+
+              <label class="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.current.llm.enabled}
+                  onchange={(event) => updateLlm({ enabled: event.currentTarget.checked })}
+                />
+                <span>LLM cleanup</span>
+              </label>
+
+              <label class="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.current.privacy_mode}
+                  onchange={(event) =>
+                    void settings.update({ privacy_mode: event.currentTarget.checked })}
+                />
+                <span>Privacy mode</span>
+              </label>
+
+              <label class="settings-field">
+                <span>Model</span>
+                <select
+                  value={settings.current.llm.model}
+                  onchange={(event) => updateLlm({ model: event.currentTarget.value })}
+                >
+                  {#each settings.options.llm_models as option (option.value)}
+                    <option value={option.value}
+                      >{option.label}{option.value === settings.current.llm.model
+                        ? " (active)"
+                        : ""}</option
+                    >
+                  {/each}
+                </select>
+                <small>{modelDetail(settings.options.llm_models, settings.current.llm.model)}</small
+                >
+              </label>
+
+              <label class="settings-field">
+                <span>Endpoint</span>
+                <input
+                  value={settings.current.llm.endpoint}
+                  oninput={(event) => updateLlm({ endpoint: event.currentTarget.value })}
+                />
+              </label>
+
+              <label class="settings-field">
+                <span>API key</span>
+                <input
+                  type="password"
+                  value={settings.current.llm.api_key ?? ""}
+                  oninput={(event) => updateLlm({ api_key: event.currentTarget.value || null })}
+                />
+              </label>
+            </section>
+
+            <section class="settings-section">
+              <div class="settings-section-head">
+                <span class="step-icon"><Icon name="key" size={14} /></span>
+                <div>
+                  <span class="section-kicker">Input</span>
+                  <h3>Hotkeys</h3>
+                </div>
+              </div>
+
+              {#each hotkeyRows as row (row.key)}
+                <label class="settings-field">
+                  <span>{row.label}</span>
+                  <div class="hotkey-capture">
+                    <input
+                      value={settings.current.hotkeys[row.key]}
+                      oninput={(event) => updateHotkey(row.key, event.currentTarget.value)}
+                    />
+                    <button
+                      class="quiet-button"
+                      type="button"
+                      onclick={() => (capturingHotkey = row.key)}
+                    >
+                      {capturingHotkey === row.key ? "Press keys" : "Capture"}
+                    </button>
+                  </div>
+                </label>
+              {/each}
+            </section>
+
+            <section class="settings-section">
+              <div class="settings-section-head">
+                <span class="step-icon"><Icon name="database" size={14} /></span>
+                <div>
+                  <span class="section-kicker">Memory</span>
+                  <h3>Embeddings</h3>
+                </div>
+              </div>
+
+              <label class="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.current.embed.enabled}
+                  onchange={(event) => updateEmbed({ enabled: event.currentTarget.checked })}
+                />
+                <span>History embeddings</span>
+              </label>
+
+              <label class="settings-field">
+                <span>Model</span>
+                <select
+                  value={settings.current.embed.model}
+                  onchange={(event) => updateEmbed({ model: event.currentTarget.value })}
+                >
+                  {#each settings.options.embed_models as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </select>
+              </label>
+
+              <label class="settings-field">
+                <span>Endpoint</span>
+                <input
+                  value={settings.current.embed.endpoint}
+                  oninput={(event) => updateEmbed({ endpoint: event.currentTarget.value })}
+                />
+              </label>
+            </section>
+
+            <section class="settings-section">
+              <div class="settings-section-head">
+                <span class="step-icon"><Icon name="pen" size={14} /></span>
+                <div>
+                  <span class="section-kicker">Styles</span>
+                  <h3>Overrides</h3>
+                </div>
+              </div>
+              <label class="settings-field">
+                <span>Default style</span>
+                <select
+                  value={settings.style}
+                  onchange={(event) => selectStyle(event.currentTarget.value as Style)}
+                >
+                  {#each styleOptions as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </select>
+              </label>
+              <div class="empty-panel compact-empty">No app overrides</div>
+            </section>
+
+            <section class="settings-section">
+              <div class="settings-section-head">
+                <span class="step-icon"><Icon name="server" size={14} /></span>
+                <div>
+                  <span class="section-kicker">Portable</span>
+                  <h3>Import / Export</h3>
+                </div>
+              </div>
+
+              <div class="settings-actions">
+                <button class="quiet-button" type="button" onclick={() => void exportSettings()}>
+                  <Icon name="download" size={13} /> Export
+                </button>
+                <button class="quiet-button" type="button" onclick={() => void importSettings()}>
+                  <Icon name="upload" size={13} /> Import
+                </button>
+              </div>
+              <label class="settings-field">
+                <span>JSON</span>
+                <textarea
+                  rows="5"
+                  value={settingsExportJson || settingsImportJson}
+                  placeholder="boothrflow.settings.json"
+                  oninput={(event) => {
+                    settingsExportJson = "";
+                    settingsImportJson = event.currentTarget.value;
+                  }}
+                ></textarea>
+              </label>
+            </section>
+          </div>
+        </div>
+      </div>
+    {/if}
+
     <section class="toolbar" aria-label="Dictation controls and model status">
       <label class="field compact-field">
         <span>Style</span>
@@ -484,12 +868,12 @@
 
       <div
         class="model-chip"
-        title={whisperModel === "ggml-tiny.en"
-          ? "Tiny is fast but error-prone. For better quality run: pnpm download:model:mac small  (then set BOOTHRFLOW_WHISPER_MODEL_FILE=ggml-small.en.bin)"
+        title={whisperModel === "tiny.en"
+          ? "Tiny is fast but error-prone. Switch to Whisper small.en in Settings for better quality."
           : ""}
       >
         <span>STT</span>
-        <strong>Whisper {whisperLabel(whisperModel)}</strong>
+        <strong>{modelLabel(settings.options.whisper_models, whisperModel)}</strong>
         <small>{formatMs(sttMs)}</small>
       </div>
       <div class="model-chip">

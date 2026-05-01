@@ -30,6 +30,143 @@ pub fn set_dictation_style(style: Style) {
     settings::set_current_style(style);
 }
 
+#[tauri::command]
+pub fn settings_get(
+    store: tauri::State<'_, settings::SettingsStore>,
+) -> Result<settings::AppSettings, BoothError> {
+    store.load()
+}
+
+#[tauri::command]
+pub fn settings_update(
+    store: tauri::State<'_, settings::SettingsStore>,
+    patch: settings::SettingsPatch,
+) -> Result<settings::AppSettings, BoothError> {
+    store.update(patch)
+}
+
+#[tauri::command]
+pub fn settings_options() -> settings::SettingsOptions {
+    settings::settings_options()
+}
+
+#[tauri::command]
+pub fn settings_export(
+    store: tauri::State<'_, settings::SettingsStore>,
+) -> Result<String, BoothError> {
+    store.export_json()
+}
+
+#[tauri::command]
+pub fn settings_import(
+    store: tauri::State<'_, settings::SettingsStore>,
+    json: String,
+) -> Result<settings::AppSettings, BoothError> {
+    store.import_json(&json)
+}
+
+#[cfg(feature = "real-engines")]
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct WhisperDownloadResult {
+    pub model: String,
+    pub file: String,
+    pub path: String,
+    pub already_present: bool,
+}
+
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+pub async fn whisper_download_model(model: String) -> Result<WhisperDownloadResult, BoothError> {
+    let model_info = settings::whisper_model_for(&model)
+        .ok_or_else(|| BoothError::internal(format!("unsupported Whisper model: {model}")))?;
+    let dest_dir = crate::stt::default_models_dir()
+        .ok_or_else(|| BoothError::internal("could not resolve user data directory"))?;
+    let dest = dest_dir.join(model_info.file);
+
+    if dest.exists() {
+        return Ok(WhisperDownloadResult {
+            model: model_info.value.into(),
+            file: model_info.file.into(),
+            path: dest.display().to_string(),
+            already_present: true,
+        });
+    }
+
+    std::fs::create_dir_all(&dest_dir)
+        .map_err(|e| BoothError::internal(format!("create models dir: {e}")))?;
+
+    let repo_script = std::env::current_dir()
+        .map(|cwd| cwd.join("scripts").join("download-model.sh"))
+        .ok()
+        .filter(|path| path.exists());
+
+    let status = if let Some(script) = repo_script {
+        std::process::Command::new(script)
+            .arg(model_info.download_arg)
+            .status()
+            .map_err(|e| BoothError::internal(format!("run model downloader: {e}")))?
+    } else {
+        let url = format!(
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
+            model_info.file
+        );
+        #[cfg(windows)]
+        {
+            let ps_command = format!(
+                "Invoke-WebRequest -Uri '{}' -OutFile '{}'",
+                url,
+                dest.display()
+            );
+            std::process::Command::new("powershell")
+                .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"])
+                .arg(ps_command)
+                .status()
+                .map_err(|e| BoothError::internal(format!("download model: {e}")))?
+        }
+        #[cfg(not(windows))]
+        {
+            std::process::Command::new("curl")
+                .args(["-L", "--fail", "-o"])
+                .arg(&dest)
+                .arg(url)
+                .status()
+                .map_err(|e| BoothError::internal(format!("download model: {e}")))?
+        }
+    };
+
+    if !status.success() || !dest.exists() {
+        return Err(BoothError::internal(format!(
+            "model download failed for {}",
+            model_info.file
+        )));
+    }
+
+    Ok(WhisperDownloadResult {
+        model: model_info.value.into(),
+        file: model_info.file.into(),
+        path: dest.display().to_string(),
+        already_present: false,
+    })
+}
+
+#[cfg(not(feature = "real-engines"))]
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct WhisperDownloadResult {
+    pub model: String,
+    pub file: String,
+    pub path: String,
+    pub already_present: bool,
+}
+
+#[cfg(not(feature = "real-engines"))]
+#[tauri::command]
+pub async fn whisper_download_model(model: String) -> Result<WhisperDownloadResult, BoothError> {
+    let _ = model;
+    Err(BoothError::internal(
+        "Whisper model downloads require the real-engines build",
+    ))
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // macOS permissions helpers
 //
@@ -108,8 +245,7 @@ pub fn microphone_available() -> bool {
 #[cfg(feature = "real-engines")]
 #[tauri::command]
 pub fn whisper_model_name() -> String {
-    let file = std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE")
-        .unwrap_or_else(|_| crate::stt::DEFAULT_MODEL_FILE.to_string());
+    let file = settings::current_whisper_model_file();
     std::path::Path::new(&file)
         .file_stem()
         .and_then(|s| s.to_str())

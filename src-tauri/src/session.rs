@@ -111,65 +111,20 @@ mod real {
     fn run(app: AppHandle, history: Option<Arc<HistoryStore>>) -> crate::error::Result<()> {
         let hotkey = RdevHotkeySource::new();
         let hotkey_rx = hotkey.start()?;
-        tracing::info!("session daemon ready — Ctrl+Meta to dictate");
+        tracing::info!(
+            "session daemon ready — {} to dictate",
+            settings::current_hotkeys().ptt
+        );
 
         let audio = CpalAudioSource::new();
 
-        // Whisper loads at daemon startup. tiny.en is ~75MB on disk and
-        // ~300MB resident; load takes a few seconds. Failure is recoverable —
-        // the daemon keeps running and reports model-missing on each press.
-        let stt: Option<WhisperSttEngine> = match WhisperSttEngine::from_default_location() {
-            Ok(engine) => {
-                tracing::info!("whisper: model loaded");
-                Some(engine)
-            }
-            Err(e) => {
-                tracing::warn!("whisper not available: {e}");
-                let _ = app.emit("dictation:model-missing", e.to_string());
-                None
-            }
-        };
+        // Whisper is hot-swappable from Settings. Load once at startup, then
+        // reload on the next press if the configured model file changes.
+        let mut stt: Option<WhisperSttEngine> = None;
+        let mut stt_model_file: Option<String> = None;
+        ensure_stt_loaded(&app, &mut stt, &mut stt_model_file);
 
-        // LLM cleanup via OpenAI-compatible HTTP. Ollama on localhost:11434
-        // by default; configurable via BOOTHRFLOW_LLM_* env vars. Failures
-        // (server down, model missing, timeout) fall back to raw transcript.
-        let llm: Option<OpenAiCompatLlmCleanup> = match OpenAiCompatLlmCleanup::from_env() {
-            None => {
-                tracing::info!("llm: disabled via BOOTHRFLOW_LLM_DISABLED");
-                None
-            }
-            Some(Ok(engine)) => {
-                tracing::info!(
-                    "llm: openai-compat HTTP (endpoint={}, model={})",
-                    engine.endpoint(),
-                    engine.model()
-                );
-                // Pre-warm in a background thread so the first user dictation
-                // doesn't pay the model-load tax (typically 3-5s the first
-                // time Ollama touches a freshly-pulled model).
-                let prewarm_endpoint = engine.endpoint().to_string();
-                let prewarm_model = engine.model().to_string();
-                let prewarm_key = std::env::var("BOOTHRFLOW_LLM_API_KEY").ok();
-                std::thread::Builder::new()
-                    .name("boothrflow-llm-prewarm".into())
-                    .spawn(move || {
-                        if let Ok(warm) = OpenAiCompatLlmCleanup::new(
-                            prewarm_endpoint,
-                            prewarm_model,
-                            prewarm_key,
-                        ) {
-                            warm.prewarm();
-                        }
-                    })
-                    .ok();
-                Some(engine)
-            }
-            Some(Err(e)) => {
-                tracing::warn!("llm: client init failed, falling back to raw: {e}");
-                let _ = app.emit("dictation:llm-missing", e.to_string());
-                None
-            }
-        };
+        prewarm_llm_from_settings();
 
         // Injector. ClipboardInjector init failure is rare (would mean
         // OS-level clipboard access denied); we still keep the daemon
@@ -205,7 +160,10 @@ mod real {
                     // terminate the session in the inner loop below.
                     let toggle_session = matches!(event, HotkeyEvent::ToggleDictation);
                     if toggle_session {
-                        tracing::info!("hotkey: toggle-on (Ctrl+Alt+Space)");
+                        tracing::info!(
+                            "hotkey: toggle-on ({})",
+                            settings::current_hotkeys().toggle
+                        );
                     }
 
                     // Per-press monotonic clock: stage at_ms timestamps and
@@ -232,6 +190,8 @@ mod real {
                     // Streaming partials. Optional — if the worker fails to
                     // spawn we just don't emit partials; the final pass still
                     // produces the same transcript on release.
+                    ensure_stt_loaded(&app, &mut stt, &mut stt_model_file);
+
                     let streaming =
                         stt.as_ref().and_then(|engine| {
                             match StreamingTranscriber::spawn(
@@ -316,7 +276,6 @@ mod real {
                             transcribe_and_emit(
                                 &app,
                                 engine,
-                                llm.as_ref(),
                                 injector.as_ref(),
                                 history.as_deref(),
                                 dictation_started,
@@ -345,10 +304,74 @@ mod real {
         Ok(())
     }
 
+    fn ensure_stt_loaded(
+        app: &AppHandle,
+        stt: &mut Option<WhisperSttEngine>,
+        loaded_model_file: &mut Option<String>,
+    ) {
+        let model_file = settings::current_whisper_model_file();
+        if stt.is_some() && loaded_model_file.as_deref() == Some(model_file.as_str()) {
+            return;
+        }
+
+        *stt = None;
+        *loaded_model_file = None;
+
+        let path = match crate::stt::default_models_dir() {
+            Some(dir) => dir.join(&model_file),
+            None => {
+                let msg = "could not resolve user data directory";
+                tracing::warn!("whisper not available: {msg}");
+                let _ = app.emit("dictation:model-missing", msg);
+                return;
+            }
+        };
+        let name = std::path::Path::new(&model_file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("whisper")
+            .to_string();
+
+        match WhisperSttEngine::from_path(&path, name) {
+            Ok(engine) => {
+                tracing::info!("whisper: model loaded ({model_file})");
+                *stt = Some(engine);
+                *loaded_model_file = Some(model_file);
+            }
+            Err(e) => {
+                tracing::warn!("whisper not available: {e}");
+                let _ = app.emit("dictation:model-missing", e.to_string());
+            }
+        }
+    }
+
+    fn prewarm_llm_from_settings() {
+        let settings = settings::current_app_settings();
+        let Some(llm) = OpenAiCompatLlmCleanup::from_settings(&settings.llm) else {
+            tracing::info!("llm: disabled via settings");
+            return;
+        };
+        let engine = match llm {
+            Ok(engine) => engine,
+            Err(e) => {
+                tracing::warn!("llm: client init failed, falling back to raw: {e}");
+                return;
+            }
+        };
+        tracing::info!(
+            "llm: openai-compat HTTP (endpoint={}, model={})",
+            engine.endpoint(),
+            engine.model()
+        );
+        std::thread::Builder::new()
+            .name("boothrflow-llm-prewarm".into())
+            .spawn(move || engine.prewarm())
+            .ok();
+    }
+
     fn transcribe_and_emit(
         app: &AppHandle,
         engine: &WhisperSttEngine,
-        llm: Option<&OpenAiCompatLlmCleanup>,
         injector: Option<&ClipboardInjector>,
         history: Option<&HistoryStore>,
         dictation_started: Instant,
@@ -393,7 +416,7 @@ mod real {
         // back to raw transcript on any LLM failure.
         emit_stage(app, "cleaning", dictation_started);
         let style = settings::current_style();
-        let cleanup = run_llm_cleanup(&stt_result.text, style, llm);
+        let cleanup = run_llm_cleanup(&stt_result.text, style);
         if let Some(err) = cleanup.error {
             // Surface so the UI can show "Cleanup unavailable — using raw"
             // instead of silently displaying 0 ms.
@@ -489,19 +512,24 @@ mod real {
         }
     }
 
-    fn run_llm_cleanup(
-        raw: &str,
-        style: settings::Style,
-        llm: Option<&OpenAiCompatLlmCleanup>,
-    ) -> CleanupOutcome {
+    fn run_llm_cleanup(raw: &str, style: settings::Style) -> CleanupOutcome {
         // Hard skips: explicit raw style, no LLM loaded, very short utterance.
-        if matches!(style, settings::Style::Raw) {
+        if matches!(style, settings::Style::Raw) || settings::privacy_mode_enabled() {
             return CleanupOutcome::passthrough(raw);
         }
-        let Some(llm) = llm else {
-            return CleanupOutcome::passthrough(raw);
+        let settings = settings::current_app_settings();
+        let llm = match OpenAiCompatLlmCleanup::from_settings(&settings.llm) {
+            None => return CleanupOutcome::passthrough(raw),
+            Some(Ok(llm)) => llm,
+            Some(Err(e)) => {
+                tracing::error!("llm client init failed, falling back to raw: {e}");
+                return CleanupOutcome {
+                    error: Some(e.to_string()),
+                    ..CleanupOutcome::passthrough(raw)
+                };
+            }
         };
-        if should_skip_llm(raw, true) {
+        if should_skip_llm(raw, settings.llm.enabled) {
             return CleanupOutcome::passthrough(raw);
         }
 

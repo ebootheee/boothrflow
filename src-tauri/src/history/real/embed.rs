@@ -8,9 +8,8 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{BoothError, Result};
+use crate::settings::EmbedSettings;
 
-pub const DEFAULT_ENDPOINT: &str = "http://localhost:11434/v1/embeddings";
-pub const DEFAULT_MODEL: &str = "nomic-embed-text";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct EmbeddingClient {
@@ -34,16 +33,15 @@ impl EmbeddingClient {
         })
     }
 
-    pub fn from_env() -> Option<Result<Self>> {
-        if std::env::var("BOOTHRFLOW_HISTORY_DISABLED").is_ok() {
+    pub fn from_settings(settings: &EmbedSettings) -> Option<Result<Self>> {
+        if !settings.enabled {
             return None;
         }
-        let endpoint =
-            std::env::var("BOOTHRFLOW_EMBED_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.into());
-        let model =
-            std::env::var("BOOTHRFLOW_EMBED_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into());
-        let api_key = std::env::var("BOOTHRFLOW_EMBED_API_KEY").ok();
-        Some(Self::new(endpoint, model, api_key))
+        Some(Self::new(
+            settings.endpoint.clone(),
+            settings.model.clone(),
+            settings.api_key.clone(),
+        ))
     }
 
     pub fn endpoint(&self) -> &str {

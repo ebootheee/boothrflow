@@ -89,12 +89,8 @@ impl WhisperSttEngine {
                     ))
                 })?;
 
-        // Resolve initial_prompt from env var, default seed, or empty.
-        let initial_prompt = match std::env::var("BOOTHRFLOW_WHISPER_PROMPT") {
-            Ok(s) if s.is_empty() => None,
-            Ok(s) => Some(s),
-            Err(_) => Some(DEFAULT_INITIAL_PROMPT.to_string()),
-        };
+        // Resolve initial_prompt from Settings first, then env/default.
+        let initial_prompt = crate::settings::current_whisper_prompt(DEFAULT_INITIAL_PROMPT);
 
         Ok(Self {
             context: Arc::new(context),
@@ -107,8 +103,7 @@ impl WhisperSttEngine {
     /// directory. Honors `BOOTHRFLOW_WHISPER_MODEL_FILE` for swapping
     /// tiny → base / small / large-v3-turbo without recompile.
     pub fn from_default_location() -> Result<Self> {
-        let file = std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE")
-            .unwrap_or_else(|_| DEFAULT_MODEL_FILE.to_string());
+        let file = crate::settings::current_whisper_model_file();
 
         let path = default_models_dir()
             .ok_or_else(|| {
@@ -214,8 +209,7 @@ impl SttEngine for SerializedWhisperSttEngine {
 }
 
 pub fn default_model_path() -> Option<PathBuf> {
-    let file = std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE")
-        .unwrap_or_else(|_| DEFAULT_MODEL_FILE.to_string());
+    let file = crate::settings::current_whisper_model_file();
     default_models_dir().map(|d| d.join(file))
 }
 

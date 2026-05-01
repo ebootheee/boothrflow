@@ -135,15 +135,8 @@ pub fn is_paused() -> bool {
     PAUSED.load(Ordering::SeqCst)
 }
 
-fn dictation_hotkey_label() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        "Ctrl+Cmd"
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        "Ctrl+Win"
-    }
+fn dictation_hotkey_label() -> String {
+    crate::settings::current_hotkeys().ptt
 }
 
 #[cfg(target_os = "macos")]
