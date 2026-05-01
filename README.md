@@ -8,7 +8,7 @@ An open-source replacement for [Wispr Flow](https://wisprflow.ai/), built around
 2. **Tiny footprint.** Tauri 2 + Rust. Target: ~30MB installer, ~80MB RAM idle.
 3. **Persistent, searchable memory.** Every dictation goes into a local SQLite store with both lexical and semantic search _(landing in Phase 3)_.
 
-**Status:** pre-alpha. Hot path (mic → Whisper STT → LLM cleanup → paste) works on Windows and macOS, with persistent history and quick-paste palette. App-context-aware structured formatting and the in-app Settings panel are next. See [`ROADMAP.md`](./ROADMAP.md).
+**Status:** pre-alpha. Hot path (mic → Whisper STT → LLM cleanup → paste) works on Windows and macOS, with persistent history, quick-paste palette, and an in-app Settings panel. Context-aware cleanup (OCR window context + auto-learning correction store) is next. See [`ROADMAP.md`](./ROADMAP.md).
 
 ## Try it (macOS)
 
@@ -109,23 +109,24 @@ hands-free dictation session, tap again to stop.
 
 ## Status
 
-| Area                                                                  | Status                               |
-| --------------------------------------------------------------------- | ------------------------------------ |
-| Plan + 15 ADRs                                                        | Done                                 |
-| Scaffold + green test suite                                           | Done — 42 Rust + 7 FE tests passing  |
-| **P1 W1**: audio + hotkey + pill                                      | Done                                 |
-| **P1 W2**: VAD + Whisper STT                                          | Done — needs ggml-tiny.en.bin        |
-| **P1 W3**: paste injection + tray                                     | Done                                 |
-| **P2 W4**: LLM cleanup (OpenAI-compat HTTP) + style picker            | Done — needs Ollama or compat server |
-| **Wave 3**: macOS port                                                | Done                                 |
-| **Wave 4a**: cleanup quality + tok/s + streaming roll + Captain's Log | Done                                 |
-| Memory / history                                                      | Done                                 |
-| **LLM default**: Qwen 2.5 7B (1.5B fallback via env var)              | Done — needs `pnpm ollama:pull`      |
-| **Wave 4b**: in-app Settings panel                                    | Next                                 |
-| **P2 W5**: app-context detection                                      | Roadmapped                           |
-| **Phase 2 backlog**: OCR window context + auto-learning corrections   | Roadmapped (see ROADMAP.md)          |
-| **Phase 2 backlog**: structured/app-aware formatting                  | Roadmapped (see ROADMAP.md)          |
-| Linux                                                                 | Phase 4                              |
+| Area                                                                           | Status                               |
+| ------------------------------------------------------------------------------ | ------------------------------------ |
+| Plan + 15 ADRs                                                                 | Done                                 |
+| Scaffold + green test suite                                                    | Done — 47 Rust + 7 FE tests passing  |
+| **P1 W1**: audio + hotkey + pill                                               | Done                                 |
+| **P1 W2**: VAD + Whisper STT                                                   | Done — needs ggml-tiny.en.bin        |
+| **P1 W3**: paste injection + tray                                              | Done                                 |
+| **P2 W4**: LLM cleanup (OpenAI-compat HTTP) + style picker                     | Done — needs Ollama or compat server |
+| **Wave 3**: macOS port                                                         | Done                                 |
+| **Wave 4a**: cleanup quality + tok/s + streaming roll + Captain's Log          | Done                                 |
+| Memory / history                                                               | Done                                 |
+| **LLM default**: Qwen 2.5 7B (1.5B fallback via env var or Settings)           | Done — needs `pnpm ollama:pull`      |
+| **Wave 4B**: in-app Settings panel                                             | Done                                 |
+| **Wave 4b polish**: Keychain, Specta, Test connection, Permissions-in-Settings | Roadmapped (see ROADMAP.md)          |
+| **Wave 5**: OCR window context + auto-learning corrections                     | Next                                 |
+| **P2 W5**: app-context detection                                               | Roadmapped                           |
+| **Phase 2 backlog**: structured/app-aware formatting                           | Roadmapped (see ROADMAP.md)          |
+| Linux                                                                          | Phase 4                              |
 
 ## Documentation
 

@@ -2,7 +2,7 @@
 
 > Where we are and where we're going. The detailed engineering plan lives in [`PLAN.md`](./PLAN.md); this is the user-facing summary.
 
-## Current state — Waves 1–3 + Wave 4a landed on `main` (April 2026)
+## Current state — Waves 1–3 + Wave 4a + Wave 4B landed on `main` (April 2026)
 
 The core push-to-talk dictation loop works end-to-end on Windows _and_ macOS.
 
@@ -14,10 +14,11 @@ The core push-to-talk dictation loop works end-to-end on Windows _and_ macOS.
 - **Streaming partials with commit-and-roll** — pill keeps updating indefinitely on long dictations (LA2-stable prefix freezes at the 20 s mark, audio buffer trims to a 3 s overlap, suffix-prefix dedup keeps the boundary words clean).
 - Persistent searchable history (SQLite + FTS5 + nomic-embed-text vectors)
 - Quick-paste palette (Alt+Win+H / Option+Cmd+H)
+- **In-app Settings** panel (Wave 4B): Whisper / LLM / embed model pickers with parameter-count labels, hotkey rebind UI, vocabulary editor, privacy toggle, settings export/import. Persists via `tauri-plugin-store`.
 - macOS first-run permissions panel (Microphone / Accessibility / Input Monitoring)
 - 100% local: no audio or transcripts leave your machine
 
-**What's missing:** in-app Settings panel (Wave 4b — next), Qwen 7B default (gated by Settings), structured/app-aware formatting, OCR window context, auto-learning correction store, Linux port, code-signing + notarization, onboarding wizard. See below.
+**What's missing:** Wave 4b polish (Test-connection button, preset chips, autostart toggle, About section, Permissions-in-Settings, equal-width grid, API keys → macOS Keychain, full tauri-specta TS-binding generation), structured/app-aware formatting, OCR window context, auto-learning correction store, Linux port, code-signing + notarization, onboarding wizard. See below.
 
 ### Cross-platform status (post Wave 3 polish)
 
@@ -58,7 +59,7 @@ Goal: feels like Wispr Flow.
 
 - **Cleanup quality refinements** _(near-term, prompted by Wave 3 dictation UAT)_ — observed gaps from Eric's hands-free dictation pass:
   - **Mumbling / rambling removal.** Filler phrases ("you know", "I mean", "uh", "kind of"), false starts, restarts, and tangential half-sentences should be cleaned up by default in non-Raw styles. Today's prompt asks the model to preserve words exactly. Need a graded mode: keep the meaning, drop the disfluency. Plumbing: a per-style `aggressiveness` flag in the system prompt (0 = preserve verbatim, 1 = drop fillers, 2 = light paraphrase). Casual default = 1.
-  - ✅ **Bumped default to Qwen 2.5 7B** (April 2026). Wave 3 UAT showed 1.5B is fast (~150-300ms typical) but borderline on quality. 7B costs ~350-400ms which is below the "feels instant" threshold for cleanup. Documented as ADR-015. Users on slower boxes drop back via `BOOTHRFLOW_LLM_MODEL=qwen2.5:1.5b` until the in-app Settings panel ships and exposes a UI picker.
+  - ✅ **Bumped default to Qwen 2.5 7B** (April 2026). Wave 3 UAT showed 1.5B is fast (~150-300ms typical) but borderline on quality. 7B costs ~350-400ms which is below the "feels instant" threshold for cleanup. Documented as ADR-015. Users on slower boxes can now switch back via the LLM picker in Settings (Wave 4B, `509e7a7`); env-var fallback still works for headless setups.
   - **Vocabulary expansion.** The Whisper `initial_prompt` doesn't currently list "Qwen" (or "Wispr", "Tauri-Specta", "boothrflow", "MTLDevice"…). Misses on those words ride through to the LLM, which can't always recover. Action: append a curated tech-vocab chunk to `DEFAULT_INITIAL_PROMPT` and let the (future) Personal Dictionary append user-specific terms on top.
   - **Spelled-out word detection** — when the user spells a name or technical term mid-sentence ("my last name is Boothe, B-O-O-T-H-E", "the project is called Q-W-E-N as in queen with a W"), the STT often produces a sequence of letter-tokens that the LLM doesn't know to treat as authoritative. Plumbing: a pre-cleanup pass that scans the raw transcript for spelling patterns —
     - Hyphen-joined uppercase runs: `B-O-O-T-H-E`, `Q-W-E-N`
@@ -88,7 +89,18 @@ Goal: feels like Wispr Flow.
   - **Auto-format** — see "Structured formatting (app-aware)" below; the larger of the two style extensions.
 - **App-context detection** — `GetForegroundWindow` + UI Automation to detect Slack vs Gmail vs IDE, applies the right style automatically.
 - **Structured formatting (app-aware)** — beyond punctuation. Wispr Flow's superpower is that long dictations come back as actual _structure_: bullet lists when you spoke a list, paragraph breaks when you paused, a greeting + signature in Mail, code fenced when you said "in code". Plumbing: extend the cleanup prompt with a structure-detection pass keyed on app context (Mail / Slack / Notion / IDE / generic) plus heuristics on the raw transcript ("first… second… third" → numbered list; >25s of speech → paragraph splits at sentence-boundary pause markers). Surfaces as a sixth Style ("Auto-format") that overrides tone-only styles when the model has high confidence; falls back to plain casual cleanup otherwise.
-- **In-app Settings panel** — every setting that's currently env-var-only should be flippable from the UI. Whisper model picker (tiny / base / small / medium / large-v3-turbo, with download-on-select), LLM endpoint + model + API key, embed endpoint + model, hotkey rebind (PTT chord, toggle chord, quick-paste chord), per-app style overrides, privacy-mode toggle, `BOOTHRFLOW_WHISPER_PROMPT` for vocabulary biasing. Persists to `tauri-plugin-store` (already in the dependency tree). Pre-req: typed Tauri command surface (ADR-007 deferred work) so the FE doesn't have to mirror Rust types by hand for ~15 new commands.
+- ✅ **In-app Settings panel** — shipped in Wave 4B (`509e7a7`). Whisper / LLM / embed pickers (with parameter counts in dropdown labels), hotkey rebind UI, vocabulary editor, privacy toggle, settings export/import, persisted via `tauri-plugin-store`. See `docs/waves/wave-4b-settings-panel.md`.
+
+- **Wave 4b polish (deferred + incoming)** — items the Wave 4B cut explicitly skipped, plus polish ideas from the parallel PRs (#2 / #3, closed pending rebase against new `main`):
+  - **API keys → macOS Keychain** — currently stored in the app settings store. Move to OS keychain via `keyring-rs` so secrets aren't sitting in plaintext JSON next to the user's data dir. Falls back to the encrypted `tauri-plugin-store` backend on platforms where keychain is unavailable.
+  - **Full `tauri-specta` TS-binding generation** — currently the FE manually mirrors Rust struct shapes. ADR-007 work, finally has the right scale of typed commands (~20 across Wave 4B) to be worth wiring. Eliminates one of the most common bug surfaces.
+  - **"Test connection" button on the LLM section** — 1-token request that reports latency or error. From PR #2.
+  - **Preset chips for common LLM endpoints** — Ollama / llama.cpp / LM Studio / OpenRouter quick-select, fills endpoint + suggests model. From PR #2.
+  - **Autostart toggle** via `tauri-plugin-autostart`. From PR #2.
+  - **"About" section** with version / repo / license / model-data-dir links. From PR #2.
+  - **Sidebar nav across Settings sections** vs the current single scrollable modal — UX choice; the sidebar is generally cleaner for >3 sections. From PR #2.
+  - **Move Permissions into Settings → General** — retire the topbar Permissions button. The dismissable mic-blocked notice on the dashboard stays (critical state shouldn't hide behind a click). From PR #3.
+  - **Equal-width workspace grid** — `.workspace-grid` from `minmax(0, 1fr) 360px` to `minmax(0, 1fr) minmax(0, 1fr)` for the Transcript / Pipeline columns. From PR #3.
 - **Personal dictionary** — manual add + auto-learn from your post-edits. Hot-word boost via Whisper's `initial_prompt` trick.
 - **Skip-LLM hotkey** — explicit "raw mode" for code dictation.
 
