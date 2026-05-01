@@ -23,6 +23,14 @@ path = "src/main.rs"
 name = "audio_meter"
 required-features = ["real-engines"]
 
+# Regenerates `src/lib/ipc/bindings.ts` from the current set of
+# `#[tauri::command]` handlers via tauri-specta. Run via the package.json
+# `pnpm gen` script, or directly: `cargo run --example export_bindings
+# --features real-engines`. Only the command list shape matters — no
+# runtime / no Tauri builder required.
+[[example]]
+name = "export_bindings"
+
 # ──────────────────────────────────────────────────────────────────────────
 # Features
 #
@@ -109,10 +117,14 @@ tauri-plugin-os = "2"
 tauri-plugin-process = "2"
 tauri-plugin-store = "2"
 
-# Specta — the `Type` derive only. The full tauri-specta integration
-# (typed commands + auto-generated TS bindings) lands in Phase 1 W3
-# when we have enough commands to make it worthwhile.
-specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+# Specta + tauri-specta — typed Rust → TypeScript bindings for every
+# `#[tauri::command]`. Replaces the manual TS mirror types we kept in
+# `src/lib/state/settings.svelte.ts`. Bindings auto-generated to
+# `src/lib/ipc/bindings.ts` on `cargo build` in debug mode (see
+# `lib.rs::run`). See ADR-007.
+specta = { version = "2.0.0-rc.24", features = ["derive"] }
+specta-typescript = "0.0.11"
+tauri-specta = { version = "2.0.0-rc.24", features = ["derive", "typescript"] }
 
 # Foundations
 anyhow = "1"

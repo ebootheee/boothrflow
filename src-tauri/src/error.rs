@@ -1,10 +1,12 @@
 use serde::Serialize;
 use thiserror::Error;
 
-/// Crate-wide error. Tagged enum is what crosses the Tauri boundary, so the
-/// frontend can pattern-match on `kind`.
+/// Crate-wide error. Adjacently-tagged enum so the FE can pattern-match
+/// on `kind` while specta-serde stays happy (newtype variants like
+/// `AudioCapture(String)` can't coexist with an internally-tagged enum
+/// because the payload can't be merged with the tag at the same level).
 #[derive(Debug, Error, Serialize, specta::Type)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
+#[serde(tag = "kind", content = "message", rename_all = "kebab-case")]
 pub enum BoothError {
     #[error("audio capture failed: {0}")]
     AudioCapture(String),

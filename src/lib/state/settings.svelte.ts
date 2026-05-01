@@ -6,86 +6,27 @@ import {
   toggleDictationHotkeyLabel,
 } from "$lib/services/platform";
 
-export type WhisperSettings = {
-  model: string;
-};
-
-export type LlmSettings = {
-  enabled: boolean;
-  endpoint: string;
-  model: string;
-  api_key: string | null;
-};
-
-export type EmbedSettings = {
-  enabled: boolean;
-  endpoint: string;
-  model: string;
-  api_key: string | null;
-};
-
-export type HotkeySettings = {
-  ptt: string;
-  toggle: string;
-  quick_paste: string;
-};
-
-export type AppStyleOverride = {
-  app_id: string;
-  style: Style;
-};
-
-export type AppSettings = {
-  schema_version: number;
-  style: Style;
-  privacy_mode: boolean;
-  whisper: WhisperSettings;
-  llm: LlmSettings;
-  embed: EmbedSettings;
-  hotkeys: HotkeySettings;
-  vocabulary: string;
-  per_app_styles: AppStyleOverride[];
-};
-
-export type SettingsPatch = Partial<
-  Pick<
-    AppSettings,
-    | "style"
-    | "privacy_mode"
-    | "whisper"
-    | "llm"
-    | "embed"
-    | "hotkeys"
-    | "vocabulary"
-    | "per_app_styles"
-  >
->;
-
-export type ModelOption = {
-  value: string;
-  label: string;
-  detail: string;
-  file: string | null;
-  /**
-   * Whether this option is selectable. `false` for engines listed as
-   * roadmap signals (Parakeet TDT today) that haven't been wired yet —
-   * the dropdown shows them disabled.
-   */
-  available: boolean;
-};
-
-export type SettingsOptions = {
-  whisper_models: ModelOption[];
-  llm_models: ModelOption[];
-  embed_models: ModelOption[];
-};
-
-type WhisperDownloadResult = {
-  model: string;
-  file: string;
-  path: string;
-  already_present: boolean;
-};
+// Types re-exported from the auto-generated tauri-specta bindings so the
+// FE consumes the same shapes the Rust commands return. Replaces the
+// manual mirrors we maintained pre-Specta — adding a new field on the
+// Rust side flows through `pnpm gen` → here → every consumer.
+export type {
+  AppSettings,
+  AppStyleOverride,
+  EmbedSettings,
+  HotkeySettings,
+  LlmSettings,
+  ModelOption,
+  SettingsOptions,
+  SettingsPatch,
+  WhisperSettings,
+} from "$lib/ipc/bindings";
+import type {
+  AppSettings,
+  SettingsOptions,
+  SettingsPatch,
+  WhisperDownloadResult,
+} from "$lib/ipc/bindings";
 
 const defaultSettings: AppSettings = {
   schema_version: 1,
@@ -187,13 +128,19 @@ const defaultOptions: SettingsOptions = {
 };
 
 function applyPatch(current: AppSettings, patch: SettingsPatch): AppSettings {
+  // Field-by-field merge rather than `{...current, ...patch}` because the
+  // generated `SettingsPatch` types every field as `T | null` (the wire
+  // shape — Rust `Option<T>`). Spread would clobber e.g. `style` with
+  // `null` when the patch only set `vocabulary`.
   return {
-    ...current,
-    ...patch,
+    schema_version: current.schema_version,
+    style: patch.style ?? current.style,
+    privacy_mode: patch.privacy_mode ?? current.privacy_mode,
     whisper: patch.whisper ?? current.whisper,
     llm: patch.llm ?? current.llm,
     embed: patch.embed ?? current.embed,
     hotkeys: patch.hotkeys ?? current.hotkeys,
+    vocabulary: patch.vocabulary ?? current.vocabulary,
     per_app_styles: patch.per_app_styles ?? current.per_app_styles,
   };
 }

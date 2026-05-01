@@ -38,6 +38,7 @@ use commands::{
 };
 use tauri::Manager;
 use tauri::WindowEvent;
+use tauri_specta::{collect_commands, Builder as SpectaBuilder};
 
 #[cfg(feature = "real-engines")]
 use commands::{
@@ -46,6 +47,59 @@ use commands::{
 };
 #[cfg(feature = "real-engines")]
 use std::sync::Arc;
+
+/// Build the tauri-specta `Builder` with every `#[tauri::command]` we
+/// expose. The exported TS bindings (`src/lib/ipc/bindings.ts`) and the
+/// runtime invoke handler are both derived from this single list — when
+/// you add a command, register it here and the FE gets typed bindings on
+/// the next debug build.
+#[cfg(feature = "real-engines")]
+pub fn build_specta() -> SpectaBuilder<tauri::Wry> {
+    SpectaBuilder::<tauri::Wry>::new().commands(collect_commands![
+        dictate_once,
+        set_dictation_style,
+        history_recent,
+        history_search,
+        history_delete,
+        history_clear,
+        history_stats,
+        history_paste,
+        quickpaste_paste,
+        quickpaste_close,
+        open_macos_setting,
+        microphone_available,
+        whisper_model_name,
+        settings_get,
+        settings_update,
+        settings_options,
+        settings_export,
+        settings_import,
+        whisper_download_model,
+        llm_test_connection,
+        app_version,
+        reveal_path,
+    ])
+}
+
+#[cfg(not(feature = "real-engines"))]
+pub fn build_specta() -> SpectaBuilder<tauri::Wry> {
+    SpectaBuilder::<tauri::Wry>::new().commands(collect_commands![
+        dictate_once,
+        set_dictation_style,
+        open_macos_setting,
+        microphone_available,
+        whisper_model_name,
+        settings_get,
+        settings_update,
+        settings_options,
+        settings_export,
+        settings_import,
+        whisper_download_model,
+        llm_test_connection,
+        app_version,
+        reveal_path,
+    ])
+}
 
 /// Entry point invoked from `main.rs`. Wires Tauri plugins, registers commands,
 /// and starts the runtime.
@@ -58,7 +112,28 @@ pub fn run() {
         .with_target(false)
         .init();
 
-    let mut builder = tauri::Builder::default()
+    let specta = build_specta();
+
+    // Auto-regenerate `src/lib/ipc/bindings.ts` on every debug build so
+    // the FE picks up Rust struct + command changes without manual sync.
+    // Skip in release — the file is committed and bundled apps don't
+    // have write access to the source tree.
+    #[cfg(debug_assertions)]
+    {
+        use specta_typescript::Typescript;
+        if let Err(e) = specta.export(
+            Typescript::default().header(
+                "// AUTO-GENERATED — do not edit. Source: tauri-specta in src-tauri/src/lib.rs.\n",
+            ),
+            "../src/lib/ipc/bindings.ts",
+        ) {
+            tracing::warn!("specta: failed to export TS bindings: {e}");
+        } else {
+            tracing::info!("specta: exported TS bindings to ../src/lib/ipc/bindings.ts");
+        }
+    }
+
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -90,52 +165,8 @@ pub fn run() {
             }
         });
 
-    #[cfg(feature = "real-engines")]
-    {
-        builder = builder.invoke_handler(tauri::generate_handler![
-            dictate_once,
-            set_dictation_style,
-            history_recent,
-            history_search,
-            history_delete,
-            history_clear,
-            history_stats,
-            history_paste,
-            quickpaste_paste,
-            quickpaste_close,
-            open_macos_setting,
-            microphone_available,
-            whisper_model_name,
-            settings_get,
-            settings_update,
-            settings_options,
-            settings_export,
-            settings_import,
-            whisper_download_model,
-            llm_test_connection,
-            app_version,
-            reveal_path,
-        ]);
-    }
-    #[cfg(not(feature = "real-engines"))]
-    {
-        builder = builder.invoke_handler(tauri::generate_handler![
-            dictate_once,
-            set_dictation_style,
-            open_macos_setting,
-            microphone_available,
-            whisper_model_name,
-            settings_get,
-            settings_update,
-            settings_options,
-            settings_export,
-            settings_import,
-            whisper_download_model,
-            llm_test_connection,
-            app_version,
-            reveal_path,
-        ]);
-    }
+    let builder = builder.invoke_handler(specta.invoke_handler());
+
     builder
         .setup(|app| {
             let handle = app.handle().clone();

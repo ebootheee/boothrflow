@@ -25,12 +25,14 @@ use std::sync::Arc;
 /// dropdown; the session daemon reads `settings::current_style()` before
 /// each LLM cleanup call.
 #[tauri::command]
+#[specta::specta]
 pub fn set_dictation_style(style: Style) {
     tracing::info!("settings: style → {style:?}");
     settings::set_current_style(style);
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn settings_get(
     store: tauri::State<'_, settings::SettingsStore>,
 ) -> Result<settings::AppSettings, BoothError> {
@@ -38,6 +40,7 @@ pub fn settings_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn settings_update(
     store: tauri::State<'_, settings::SettingsStore>,
     patch: settings::SettingsPatch,
@@ -46,11 +49,13 @@ pub fn settings_update(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn settings_options() -> settings::SettingsOptions {
     settings::settings_options()
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn settings_export(
     store: tauri::State<'_, settings::SettingsStore>,
 ) -> Result<String, BoothError> {
@@ -58,6 +63,7 @@ pub fn settings_export(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn settings_import(
     store: tauri::State<'_, settings::SettingsStore>,
     json: String,
@@ -76,6 +82,7 @@ pub struct WhisperDownloadResult {
 
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub async fn whisper_download_model(model: String) -> Result<WhisperDownloadResult, BoothError> {
     let model_info = settings::whisper_model_for(&model)
         .ok_or_else(|| BoothError::internal(format!("unsupported Whisper model: {model}")))?;
@@ -160,6 +167,7 @@ pub struct WhisperDownloadResult {
 
 #[cfg(not(feature = "real-engines"))]
 #[tauri::command]
+#[specta::specta]
 pub async fn whisper_download_model(model: String) -> Result<WhisperDownloadResult, BoothError> {
     let _ = model;
     Err(BoothError::internal(
@@ -192,6 +200,7 @@ pub enum MacPermissionPane {
 /// non-macOS platforms (returns Ok). The OS handles the rest — once the
 /// user toggles the relevant switch, the next dictation should work.
 #[tauri::command]
+#[specta::specta]
 pub fn open_macos_setting(pane: MacPermissionPane) -> Result<(), BoothError> {
     #[cfg(target_os = "macos")]
     {
@@ -226,6 +235,7 @@ pub fn open_macos_setting(pane: MacPermissionPane) -> Result<(), BoothError> {
 /// the cpal probe lives behind that feature.
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub fn microphone_available() -> bool {
     use cpal::traits::HostTrait;
     let host = cpal::default_host();
@@ -234,6 +244,7 @@ pub fn microphone_available() -> bool {
 
 #[cfg(not(feature = "real-engines"))]
 #[tauri::command]
+#[specta::specta]
 pub fn microphone_available() -> bool {
     true
 }
@@ -244,6 +255,7 @@ pub fn microphone_available() -> bool {
 /// `BOOTHRFLOW_WHISPER_MODEL_FILE`. Returns the file stem ("ggml-small.en").
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub fn whisper_model_name() -> String {
     let file = settings::current_whisper_model_file();
     std::path::Path::new(&file)
@@ -255,6 +267,7 @@ pub fn whisper_model_name() -> String {
 
 #[cfg(not(feature = "real-engines"))]
 #[tauri::command]
+#[specta::specta]
 pub fn whisper_model_name() -> String {
     "fake".into()
 }
@@ -269,6 +282,7 @@ pub fn whisper_model_name() -> String {
 
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub async fn history_recent(
     history: tauri::State<'_, Arc<HistoryStore>>,
     limit: Option<usize>,
@@ -278,6 +292,7 @@ pub async fn history_recent(
 
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub async fn history_search(
     history: tauri::State<'_, Arc<HistoryStore>>,
     query: String,
@@ -288,6 +303,7 @@ pub async fn history_search(
 
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub async fn history_delete(
     history: tauri::State<'_, Arc<HistoryStore>>,
     id: i64,
@@ -297,12 +313,14 @@ pub async fn history_delete(
 
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub async fn history_clear(history: tauri::State<'_, Arc<HistoryStore>>) -> Result<(), BoothError> {
     history.clear()
 }
 
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub async fn history_stats(
     history: tauri::State<'_, Arc<HistoryStore>>,
 ) -> Result<HistoryStats, BoothError> {
@@ -314,6 +332,7 @@ pub async fn history_stats(
 /// the-previously-focused-app behavior, use [`quickpaste_paste`] instead.
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub async fn history_paste(
     history: tauri::State<'_, Arc<HistoryStore>>,
     id: i64,
@@ -334,6 +353,7 @@ pub async fn history_paste(
 /// UI when the user picks an entry (Enter or click).
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub async fn quickpaste_paste(
     app: tauri::AppHandle,
     history: tauri::State<'_, Arc<HistoryStore>>,
@@ -361,6 +381,7 @@ pub async fn quickpaste_paste(
 /// Hide the quick-paste palette without pasting (e.g. user pressed Esc).
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub async fn quickpaste_close(app: tauri::AppHandle) -> Result<(), BoothError> {
     crate::quickpaste::hide(&app)?;
     crate::quickpaste::restore_target_window();
@@ -382,6 +403,7 @@ pub struct DictateResult {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn dictate_once(style: Style) -> Result<DictateResult, BoothError> {
     // v0: still using fakes end-to-end. When real engines are wired in, this
     // body becomes the only place that swaps the trait objects.
@@ -428,6 +450,7 @@ pub struct LlmTestResult {
 
 #[cfg(feature = "real-engines")]
 #[tauri::command]
+#[specta::specta]
 pub async fn llm_test_connection(
     store: tauri::State<'_, settings::SettingsStore>,
 ) -> Result<LlmTestResult, BoothError> {
@@ -489,6 +512,7 @@ pub async fn llm_test_connection(
 
 #[cfg(not(feature = "real-engines"))]
 #[tauri::command]
+#[specta::specta]
 pub async fn llm_test_connection() -> Result<LlmTestResult, BoothError> {
     // Fakes-only build doesn't have the real HTTP client; pretend the
     // probe worked so the FE smoke path still exercises this command.
@@ -501,6 +525,7 @@ pub async fn llm_test_connection() -> Result<LlmTestResult, BoothError> {
 
 /// App version reported by the Cargo manifest. Used by the About section.
 #[tauri::command]
+#[specta::specta]
 pub fn app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
@@ -510,6 +535,7 @@ pub fn app_version() -> &'static str {
 /// Falls through to `tauri-plugin-opener` so the same command works
 /// across macOS / Windows / Linux.
 #[tauri::command]
+#[specta::specta]
 pub async fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), BoothError> {
     use tauri_plugin_opener::OpenerExt;
     app.opener()

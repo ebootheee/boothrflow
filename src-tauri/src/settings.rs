@@ -97,14 +97,23 @@ pub struct AppSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]
+#[serde(default)]
 pub struct SettingsPatch {
+    #[specta(optional)]
     pub style: Option<Style>,
+    #[specta(optional)]
     pub privacy_mode: Option<bool>,
+    #[specta(optional)]
     pub whisper: Option<WhisperSettings>,
+    #[specta(optional)]
     pub llm: Option<LlmSettings>,
+    #[specta(optional)]
     pub embed: Option<EmbedSettings>,
+    #[specta(optional)]
     pub hotkeys: Option<HotkeySettings>,
+    #[specta(optional)]
     pub vocabulary: Option<String>,
+    #[specta(optional)]
     pub per_app_styles: Option<Vec<AppStyleOverride>>,
 }
 
