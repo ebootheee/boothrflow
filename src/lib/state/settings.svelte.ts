@@ -54,6 +54,7 @@ const defaultSettings: AppSettings = {
   per_app_styles: [],
   commonly_misheard: [],
   cleanup_window_ocr: false,
+  auto_learn_corrections: false,
 };
 
 const defaultOptions: SettingsOptions = {
@@ -146,6 +147,7 @@ function applyPatch(current: AppSettings, patch: SettingsPatch): AppSettings {
     per_app_styles: patch.per_app_styles ?? current.per_app_styles,
     commonly_misheard: patch.commonly_misheard ?? current.commonly_misheard ?? [],
     cleanup_window_ocr: patch.cleanup_window_ocr ?? current.cleanup_window_ocr ?? false,
+    auto_learn_corrections: patch.auto_learn_corrections ?? current.auto_learn_corrections ?? false,
   };
 }
 

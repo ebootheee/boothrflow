@@ -198,21 +198,93 @@ today fails the model resolution check and falls back. The handoff:
   transcription contains "quick brown fox". Same shape as the existing
   Whisper snapshot test.
 
-### 4. PostPasteLearningCoordinator (deferred under Wave 5b)
+### 4. PostPasteLearningCoordinator — focused-field accessibility read
 
-Pattern from ghost-pepper: after we paste, briefly poll the focused
-text field's contents (via `objc2-app-kit`'s `NSAccessibility` on
-macOS, `UIAutomation` on Windows). If the user edits a word within
-5–15 seconds and the edit is small (Levenshtein ≤ 3, single word
-swap), record `(original_word, edited_word)` as a `MisheardReplacement`
-and append to `commonly_misheard`. After two corroborations of the
-same pair, mark it auto-applied; before that, surface a small toast
-"Learned correction — Settings → Recognition" the first time.
+The Wave 5b commit lands the **structure** for auto-learning:
 
-This needs a bunch of UX decisions (when to dismiss, how to surface
-the auto-learned ones, opt-out toggle) and the accessibility-API
-plumbing to read text-field contents post-paste. Not in scope for the
-first commit on this branch — track it as **Wave 5b** in `README.md`.
+- `learning::detect_correction(pasted, current)` — pure function,
+  unit-tested for: single-word swaps, capitalization-only rejects,
+  short-word rejects, multi-word rejects, high-distance rejects,
+  long-word rejects, word-boundary safety on punctuated edits.
+- `learning::LearningCoordinator` — spawns a one-shot observation
+  thread per paste; sleeps 8s, calls the focused-text reader, runs
+  `detect_correction`, appends to `commonly_misheard` on a hit.
+- `auto_learn_corrections: bool` setting + Settings UI toggle.
+- `learning::FocusedTextReader` trait + macOS stub
+  (`MacosFocusedTextReader::read_focused_text` returns `None`).
+
+What's still stubbed: the actual `AXUIElement` call. The structure
+mirrors the OCR stub pattern — coordinator gracefully treats `None`
+as "no edit observable" and bails. To finish the wiring on macOS:
+
+1. **Crate** — easiest path is the `accessibility` crate (high-level
+   `AXUIElement` wrapper over ApplicationServices). Add to
+   `[target.'cfg(target_os = "macos")'.dependencies]`:
+
+   ```toml
+   accessibility = "0.4"
+   accessibility-sys = "0.1"
+   core-foundation = "0.10"
+   ```
+
+2. **Call sequence** — replace the stub body in
+   `src-tauri/src/learning/macos.rs::read_focused_text`:
+   - `AXUIElement::system_wide()` — get the system-wide AX root.
+   - `system_wide.attribute(&AXAttribute::new(&CFString::new("AXFocusedUIElement")))`
+     → an `AXUIElement` for the currently-focused UI element.
+   - `focused.attribute(&AXAttribute::value())` → the value, which is
+     `AXValue::String` for plain text fields, `AXValue::AttributedString`
+     for rich text. Coerce both via `to_string()`.
+   - Return `Ok(string)` on success; `None` on any access error so
+     the coordinator falls through silently.
+
+3. **Edge cases** —
+   - Web inputs (Chrome, Safari WKWebView) return AX values for
+     standard `<input>`/`<textarea>` but not for `contenteditable`
+     div hierarchies. Accept the loss; they're a minority of dictation
+     destinations.
+   - Electron apps vary: VS Code exposes AX values for the editor
+     pane; Slack / Discord do not. Test against each manually.
+   - macOS Sequoia / 15+: AX reads from a non-frontmost app return
+     null. We always read post-paste (we just injected via `enigo`,
+     so the target is frontmost). Should be fine.
+
+4. **Permission** — Accessibility (already granted for paste
+   injection via `enigo`). No new permission row needed.
+
+5. **Testing** — manual UAT against:
+   - macOS TextEdit (NSTextView, the easy case).
+   - Notes (NSTextView with attributed text).
+   - VS Code editor (Electron).
+   - Chrome `<textarea>` (WKWebView).
+   - Slack message field (Electron, _expected to fail_ — record to
+     surface as a known limitation in the help text).
+
+   For each, dictate something that contains a misrecognized word,
+   correct it within 8 seconds, then trigger another dictation and
+   verify the correction is in the `<USER-CORRECTIONS>` block via
+   `RUST_LOG=boothrflow=trace`.
+
+### 5. PostPasteLearningCoordinator — Windows UIAutomation read
+
+Same shape, different API. The Rust binding crate is the existing
+`windows = "0.58"` (already in deps for accessibility). The flow:
+
+- `CoCreateInstance(&CUIAutomation, …)` to get an `IUIAutomation`.
+- `GetFocusedElement(&mut element)` → `IUIAutomationElement`.
+- `GetCurrentPattern(UIA_ValuePatternId, &mut pattern)` → cast to
+  `IUIAutomationValuePattern`.
+- `get_CurrentValue(&mut bstr)` → the focused field's text.
+
+Caveats:
+
+- COM apartment — UIAutomation requires MTA on the calling thread,
+  which is what we want for a coordinator background thread.
+  `CoInitializeEx(COINIT_MULTITHREADED)` once at coordinator startup.
+- Some apps (legacy WPF / Win32) expose `TextPattern` instead of
+  `ValuePattern`; fall through to that if `Value` returns null.
+- Web browsers expose AX through UIAutomation reasonably well —
+  Chrome and Edge both surface `<input>` / `<textarea>` values.
 
 ## Open questions
 

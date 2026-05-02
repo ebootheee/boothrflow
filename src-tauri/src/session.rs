@@ -39,9 +39,10 @@ mod real {
     use crate::history::{HistoryStore, RecordRequest};
     use crate::hotkey::{HotkeyEvent, HotkeySource, RdevHotkeySource};
     use crate::injector::{ClipboardInjector, Injector};
+    use crate::learning::{FocusedTextReader, LearningCoordinator, PasteSnapshot};
     use crate::llm::{should_skip_llm, CleanupRequest, LlmCleanup, OpenAiCompatLlmCleanup};
     use crate::overlay;
-    use crate::settings;
+    use crate::settings::{self, SettingsStore};
     use crate::stt::{StreamingTranscriber, SttEngine, SttResult, WhisperSttEngine};
     use crate::tray;
 
@@ -98,18 +99,26 @@ mod real {
         );
     }
 
-    pub fn spawn_session_daemon(app: AppHandle, history: Option<Arc<HistoryStore>>) {
+    pub fn spawn_session_daemon(
+        app: AppHandle,
+        history: Option<Arc<HistoryStore>>,
+        settings_store: SettingsStore,
+    ) {
         thread::Builder::new()
             .name("boothrflow-session".into())
             .spawn(move || {
-                if let Err(e) = run(app, history) {
+                if let Err(e) = run(app, history, settings_store) {
                     tracing::error!("session daemon errored: {e}");
                 }
             })
             .ok();
     }
 
-    fn run(app: AppHandle, history: Option<Arc<HistoryStore>>) -> crate::error::Result<()> {
+    fn run(
+        app: AppHandle,
+        history: Option<Arc<HistoryStore>>,
+        settings_store: SettingsStore,
+    ) -> crate::error::Result<()> {
         let hotkey = RdevHotkeySource::new();
         let hotkey_rx = hotkey.start()?;
         tracing::info!(
@@ -119,6 +128,7 @@ mod real {
 
         let audio = CpalAudioSource::new();
         let context_detector = RealContextDetector::new();
+        let learning = build_learning_coordinator(settings_store.clone());
 
         // Whisper is hot-swappable from Settings. Load once at startup, then
         // reload on the next press if the configured model file changes.
@@ -281,6 +291,7 @@ mod real {
                                 injector.as_ref(),
                                 history.as_deref(),
                                 &context_detector,
+                                learning.as_ref(),
                                 dictation_started,
                                 capture_ms,
                                 &pcm,
@@ -372,12 +383,18 @@ mod real {
             .ok();
     }
 
+    // Pulling these into a struct doesn't buy clarity — every collaborator
+    // is conceptually independent (engine, injector, history, context,
+    // learning), and the function is the single coordination point for
+    // the post-STT path. Suppress the lint locally.
+    #[allow(clippy::too_many_arguments)]
     fn transcribe_and_emit(
         app: &AppHandle,
         engine: &WhisperSttEngine,
         injector: Option<&ClipboardInjector>,
         history: Option<&HistoryStore>,
         context_detector: &dyn ContextDetector,
+        learning: Option<&LearningCoordinator>,
         dictation_started: Instant,
         capture_ms: u64,
         pcm: &[f32],
@@ -464,13 +481,36 @@ mod real {
 
         emit_stage(app, "pasting", dictation_started);
         let paste_started = Instant::now();
+        let mut paste_succeeded = false;
         if let Some(inj) = injector {
-            if let Err(e) = inj.inject(&formatted) {
-                tracing::error!("inject failed: {e}");
-                let _ = app.emit("dictation:error", e.to_string());
+            match inj.inject(&formatted) {
+                Ok(()) => {
+                    paste_succeeded = true;
+                }
+                Err(e) => {
+                    tracing::error!("inject failed: {e}");
+                    let _ = app.emit("dictation:error", e.to_string());
+                }
             }
         }
         let paste_ms = paste_started.elapsed().as_millis() as u64;
+
+        // Post-paste learning observation: if the user enables auto-learn,
+        // a background thread samples the focused field after a short
+        // settling window and looks for a small single-word edit. The
+        // coordinator no-ops when auto-learn is off, so the gate is here
+        // (settings load + opt-in check) rather than inside the spawn.
+        if paste_succeeded
+            && !formatted.is_empty()
+            && !settings::privacy_mode_enabled()
+            && settings::current_app_settings().auto_learn_corrections
+        {
+            if let Some(coord) = learning {
+                coord.observe(PasteSnapshot {
+                    pasted_text: formatted.clone(),
+                });
+            }
+        }
 
         // Persist to history. Embedding fires-and-forgets in a background
         // thread inside record(); this call returns in <1ms after the SQL
@@ -610,6 +650,28 @@ mod real {
 
     fn emit_result(app: &AppHandle, result: &SttResult) {
         let _ = app.emit("dictation:result", result);
+    }
+
+    /// Build the platform-appropriate learning coordinator, or `None` on
+    /// platforms without an accessibility reader. The coordinator is
+    /// always constructed when the platform supports it — the gating on
+    /// `auto_learn_corrections` happens per-paste, so flipping the
+    /// settings toggle takes effect immediately.
+    fn build_learning_coordinator(settings_store: SettingsStore) -> Option<LearningCoordinator> {
+        let reader: Arc<dyn FocusedTextReader> = build_focused_text_reader()?;
+        Some(LearningCoordinator::new(reader, Arc::new(settings_store)))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn build_focused_text_reader() -> Option<Arc<dyn FocusedTextReader>> {
+        Some(Arc::new(crate::learning::MacosFocusedTextReader::new()))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn build_focused_text_reader() -> Option<Arc<dyn FocusedTextReader>> {
+        // Windows: TODO(wave-5b) — UIAutomation reader.
+        // Linux: AT-SPI bridge, deferred.
+        None
     }
 
     /// Parse the user's free-text vocabulary setting into a normalized

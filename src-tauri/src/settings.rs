@@ -124,6 +124,14 @@ pub struct AppSettings {
     /// of this flag.
     #[serde(default)]
     pub cleanup_window_ocr: bool,
+    /// Watch the focused field after a paste; if the user makes a
+    /// small single-word edit (Levenshtein ≤ 3), append the
+    /// `(original, edited)` pair to `commonly_misheard` so the cleanup
+    /// prompt's `<USER-CORRECTIONS>` block applies it next time. Off
+    /// by default — auto-edits a settings field, which is the kind
+    /// of thing that needs explicit consent.
+    #[serde(default)]
+    pub auto_learn_corrections: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]
@@ -149,6 +157,8 @@ pub struct SettingsPatch {
     pub commonly_misheard: Option<Vec<MisheardReplacement>>,
     #[specta(optional)]
     pub cleanup_window_ocr: Option<bool>,
+    #[specta(optional)]
+    pub auto_learn_corrections: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -219,6 +229,7 @@ impl Default for AppSettings {
             per_app_styles: Vec::new(),
             commonly_misheard: Vec::new(),
             cleanup_window_ocr: false,
+            auto_learn_corrections: false,
         }
     }
 }
@@ -267,6 +278,8 @@ impl SettingsStore {
             commonly_misheard: self.get_or("commonly_misheard", fallback.commonly_misheard)?,
             cleanup_window_ocr: self
                 .get_or("cleanup_window_ocr", fallback.cleanup_window_ocr)?,
+            auto_learn_corrections: self
+                .get_or("auto_learn_corrections", fallback.auto_learn_corrections)?,
         };
         // Prefer the OS keychain over whatever's in the settings JSON.
         // Keys land in JSON only as a legacy migration path or when the
@@ -319,6 +332,9 @@ impl SettingsStore {
         }
         if let Some(cleanup_window_ocr) = patch.cleanup_window_ocr {
             settings.cleanup_window_ocr = cleanup_window_ocr;
+        }
+        if let Some(auto_learn_corrections) = patch.auto_learn_corrections {
+            settings.auto_learn_corrections = auto_learn_corrections;
         }
 
         validate_settings(&settings)?;
@@ -379,6 +395,7 @@ impl SettingsStore {
         self.set("per_app_styles", &settings.per_app_styles)?;
         self.set("commonly_misheard", &settings.commonly_misheard)?;
         self.set("cleanup_window_ocr", settings.cleanup_window_ocr)?;
+        self.set("auto_learn_corrections", settings.auto_learn_corrections)?;
         self.store
             .save()
             .map_err(|e| BoothError::internal(format!("settings save: {e}")))?;
@@ -711,6 +728,10 @@ fn default_store_entries() -> Result<HashMap<String, JsonValue>> {
     entries.insert(
         "cleanup_window_ocr".into(),
         json(defaults.cleanup_window_ocr)?,
+    );
+    entries.insert(
+        "auto_learn_corrections".into(),
+        json(defaults.auto_learn_corrections)?,
     );
     Ok(entries)
 }

@@ -21,6 +21,7 @@ pub mod error;
 pub mod history;
 pub mod hotkey;
 pub mod injector;
+pub mod learning;
 pub mod llm;
 pub mod ocr;
 pub mod overlay;
@@ -225,7 +226,7 @@ pub fn run() {
             // Real-engines: spawn the hotkey daemon and bridge events to
             // Tauri's event system + the pill overlay + history.
             #[cfg(feature = "real-engines")]
-            session::spawn_session_daemon(handle, history);
+            session::spawn_session_daemon(handle, history, settings_store);
 
             Ok(())
         })

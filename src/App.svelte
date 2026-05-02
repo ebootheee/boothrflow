@@ -1078,6 +1078,26 @@
                       "kwen" → "Qwen"). Empty rows are ignored.</small
                     >
                   </div>
+
+                  <label class="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.current.auto_learn_corrections ?? false}
+                      onchange={(event) =>
+                        void settings.update({
+                          auto_learn_corrections: event.currentTarget.checked,
+                        })}
+                    />
+                    <span>Auto-learn corrections after paste (preview)</span>
+                  </label>
+                  <p class="settings-help">
+                    After pasting, watches the focused field for ~8 seconds. If you make a small
+                    single-word edit (e.g. correcting "kwen" → "qwen"), records it above so the
+                    cleanup pass applies it next time. Requires Accessibility permission. Disabled
+                    automatically when <em>Privacy mode</em> is on. The macOS accessibility read is
+                    being finalized — see
+                    <code>docs/waves/wave-5-context-aware-cleanup.md</code>.
+                  </p>
                 </section>
               {:else if activeSettingsSection === "history"}
                 <section class="settings-section">

@@ -96,6 +96,15 @@ export type AppSettings = {
 	 *  of this flag.
 	 */
 	cleanup_window_ocr?: boolean,
+	/**
+	 *  Watch the focused field after a paste; if the user makes a
+	 *  small single-word edit (Levenshtein ≤ 3), append the
+	 *  `(original, edited)` pair to `commonly_misheard` so the cleanup
+	 *  prompt's `<USER-CORRECTIONS>` block applies it next time. Off
+	 *  by default — auto-edits a settings field, which is the kind
+	 *  of thing that needs explicit consent.
+	 */
+	auto_learn_corrections?: boolean,
 };
 
 export type AppStyleOverride = {
@@ -236,6 +245,7 @@ export type SettingsPatch = {
 	per_app_styles?: AppStyleOverride[] | null,
 	commonly_misheard?: MisheardReplacement[] | null,
 	cleanup_window_ocr?: boolean | null,
+	auto_learn_corrections?: boolean | null,
 };
 
 export type Style = "raw" | "formal" | "casual" | "excited" | "very-casual" | 
