@@ -257,24 +257,50 @@ that nothing got re-broken.
 
 ## Part 5 — Parakeet engine
 
-### 5.1 — Parakeet is selectable
+> **Known issue (2026-05-02, Wave 5f tracking):** The only sherpa-onnx
+> Parakeet ONNX bundle currently published is `v2-int8`, built before
+> sherpa-onnx 1.10 required a `vocab_size` metadata field. Loading
+> the bundle into the engine causes sherpa-onnx C++ to call
+> `exit(-1)` during decode, which kills boothrflow.
+>
+> **Mitigation in `fix(wave-5f)`:** `ParakeetSttEngine` pre-checks
+> `decoder.onnx` for the `vocab_size` literal at engine init. If
+> absent, it returns a graceful `BoothError::Internal` instead of
+> crashing the app. Selecting Parakeet today will surface a
+> `dictation:model-missing` event in logs and the session daemon
+> will keep running on Whisper.
+>
+> **Skip 5.2-5.5 for this UAT round.** They depend on a working
+> bundle. Once a sherpa-onnx 1.10+ compatible Parakeet ONNX is
+> published or rebuilt, the metadata guard auto-passes and the
+> engine works.
+
+### 5.1 — Parakeet is selectable + fails gracefully (Wave 5f mitigation check)
 
 - [ ] Settings → Voice → Recognition → Speech-to-text model.
 - [ ] _Expected:_ "NVIDIA Parakeet TDT 0.6B v3 (preview)" is in the
       dropdown AND selectable (not greyed out). If it's still
       greyed, you didn't run `pnpm dev:parakeet` — check pre-flight.
-      _Observed 2026-05-01:_ `cargo check --features parakeet-engine`
-      passed and Rust options gate Parakeet with
-      `cfg!(feature = "parakeet-engine")`; actual dropdown selectability
-      still needs a manual Tauri UI pass.
+- [ ] Pick Parakeet from the dropdown.
+- [ ] _Expected (post-`fix(wave-5f)`):_ a `dictation:model-missing`
+      event with text mentioning `vocab_size` shows up in the dev
+      terminal logs. App stays running. Picking a Whisper model
+      restores normal operation.
+- [ ] _NOT expected:_ app crash with `exit code 255` and a sherpa-onnx
+      C++ error about `vocab_size`. If you see that, the metadata
+      guard regressed.
 
-### 5.2 — Parakeet loads
+### 5.2 — Parakeet loads (BLOCKED on Wave 5f)
 
 - [ ] Pick Parakeet from the dropdown.
 - [ ] In the dev terminal, look for:
       `parakeet: loaded from .../parakeet-tdt-0.6b-v3`
 - [ ] _Expected:_ no error events; the next dictation will use it.
       _Observed 2026-05-01:_ not executed; needs actual dropdown selection.
+      _Observed 2026-05-02:_ blocked by missing `vocab_size` metadata
+      in the bundled v2-int8 model. The guard now refuses the load,
+      so this section's "no error events" expectation can't be met
+      with the current bundle. Skip until a fixed bundle is wired.
 
 ### 5.3 — Parakeet transcribes accurately
 

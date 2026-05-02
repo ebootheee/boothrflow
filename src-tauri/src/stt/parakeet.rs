@@ -55,14 +55,25 @@ pub struct ParakeetSttEngine {
 impl ParakeetSttEngine {
     /// Construct an engine pointing at a directory that contains the
     /// four expected files. Returns `Err(BoothError::Internal(...))`
-    /// on missing files or sherpa-onnx initialization failure (bad
-    /// ONNX runtime, corrupt model, …).
+    /// on missing files, missing ONNX metadata, or sherpa-onnx
+    /// initialization failure.
     pub fn from_model_dir(model_dir: impl Into<PathBuf>) -> Result<Self> {
         let model_dir = model_dir.into();
         let encoder = require_file(&model_dir, "encoder.onnx")?;
         let decoder = require_file(&model_dir, "decoder.onnx")?;
         let joiner = require_file(&model_dir, "joiner.onnx")?;
         let tokens = require_file(&model_dir, "tokens.txt")?;
+
+        // sherpa-onnx 1.10+ requires the decoder ONNX file to carry a
+        // `vocab_size` metadata key. Older NeMo Parakeet exports
+        // (sherpa-onnx-nemo-parakeet-tdt-0.6b-v2 / v2-int8 from the
+        // `asr-models` GitHub release) don't include it, and the
+        // sherpa-onnx C++ side calls `exit(-1)` during decode when
+        // the field is missing — which takes the whole boothrflow
+        // process down. Pre-check the decoder file here so we fail
+        // gracefully (Err propagates up to `dictation:model-missing`,
+        // session daemon stays alive, user can pick another engine).
+        validate_decoder_metadata(&decoder)?;
 
         let config = TransducerConfig {
             encoder: encoder.to_string_lossy().into_owned(),
@@ -145,6 +156,38 @@ fn require_file(dir: &Path, name: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Defensive pre-check: scan the decoder ONNX file for the literal
+/// bytes `vocab_size`. ONNX metadata_props are protobuf-encoded but
+/// the keys are stored as plain UTF-8 strings, so a substring search
+/// is reliable. Files are ~30MB; the scan takes ~50ms on Apple
+/// Silicon and only runs once at engine init.
+///
+/// Returns `Err` with a user-actionable message when the metadata is
+/// missing — the failure mode that bricks the app when sherpa-onnx
+/// hits it during decode.
+fn validate_decoder_metadata(decoder_path: &Path) -> Result<()> {
+    let bytes = std::fs::read(decoder_path).map_err(|e| {
+        BoothError::internal(format!(
+            "parakeet: read decoder.onnx for metadata check: {e}"
+        ))
+    })?;
+    let needle = b"vocab_size";
+    let found = bytes
+        .windows(needle.len())
+        .any(|window| window == needle);
+    if !found {
+        return Err(BoothError::internal(
+            "parakeet: decoder.onnx is missing the `vocab_size` metadata \
+             key required by sherpa-onnx 1.10+. The bundle published as \
+             sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8 was built before \
+             that requirement landed; sherpa-onnx will exit(-1) during \
+             decode if loaded. See docs/waves/wave-5-context-aware-cleanup.md \
+             for the bundle-rebuild plan. Falling back to Whisper.",
+        ));
+    }
+    Ok(())
+}
+
 /// Pick a sensible thread count for sherpa-onnx. Default is 1 which
 /// underutilizes modern hardware; cap at 4 because Parakeet's
 /// transducer doesn't scale linearly past that and we don't want to
@@ -177,5 +220,33 @@ mod tests {
     fn num_cpus_clamps_within_range() {
         let n = num_cpus_clamped();
         assert!((1..=4).contains(&n));
+    }
+
+    #[test]
+    fn metadata_guard_rejects_files_missing_vocab_size() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("decoder.onnx");
+        // Synthetic ONNX-shaped bytes without the vocab_size key.
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"\x08\x07\x12\x07pytorch\x52\x00")
+            .unwrap();
+        match validate_decoder_metadata(&path) {
+            Ok(()) => panic!("expected vocab_size guard to fire"),
+            Err(e) => {
+                assert!(format!("{e}").contains("vocab_size"));
+            }
+        }
+    }
+
+    #[test]
+    fn metadata_guard_accepts_files_with_vocab_size() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("decoder.onnx");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"\x08\x07\x12\nvocab_size\x52\x051024\x00")
+            .unwrap();
+        validate_decoder_metadata(&path).unwrap();
     }
 }

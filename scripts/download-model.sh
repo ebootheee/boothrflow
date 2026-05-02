@@ -45,10 +45,22 @@ if [[ "${arg}" == "parakeet" ]]; then
     exit 0
   fi
 
-  # sherpa-onnx publishes ONNX-converted Parakeet bundles on GitHub
-  # releases. The v2 int8 variant is the smallest + most actively
-  # maintained; we alias it as "v3" in the picker until NVIDIA's v3
-  # release has an official ONNX export.
+  cat <<'WARN'
+
+⚠ Heads up: the only Parakeet ONNX bundle currently published on the
+  sherpa-onnx asr-models GitHub release tag is v2-int8, built before
+  sherpa-onnx 1.10 added a required `vocab_size` metadata field. Our
+  ParakeetSttEngine pre-checks for this and refuses to load — meaning
+  the toggle in Settings will surface a "model missing" error and the
+  daemon will keep using Whisper. Tracking a working bundle rebuild
+  in docs/waves/wave-5-context-aware-cleanup.md (Wave 5f).
+
+  Downloading anyway so the layout exists for when a fixed bundle
+  drops; the metadata guard will start passing automatically once
+  the files contain `vocab_size`.
+
+WARN
+
   bundle_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
   url="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${bundle_name}.tar.bz2"
   archive="${dest_dir}/${bundle_name}.tar.bz2"
