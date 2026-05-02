@@ -715,6 +715,22 @@ fn migrate(mut settings: AppSettings) -> AppSettings {
         settings.schema_version = CURRENT_SCHEMA_VERSION;
     }
     settings.whisper.model = normalize_whisper_model(&settings.whisper.model);
+
+    // Wave 5e: the legacy quick-paste default `Option + Cmd + H` collides
+    // with macOS's system-wide `Cmd + H` "hide app" shortcut. AppKit
+    // intercepts before our rdev listener sees the keypress, hiding
+    // boothrflow instead of opening the palette. Migrate users still on
+    // the legacy default to the new safe default. Users who explicitly
+    // chose a different chord are untouched — only the literal old
+    // default strings are rewritten.
+    let legacy_quickpaste = ["Option + Cmd + H", "Alt + Win + H"];
+    if legacy_quickpaste
+        .iter()
+        .any(|legacy| *legacy == settings.hotkeys.quick_paste)
+    {
+        settings.hotkeys.quick_paste = default_quick_paste_hotkey();
+    }
+
     settings
 }
 
@@ -769,10 +785,18 @@ fn default_toggle_hotkey() -> String {
 }
 
 fn default_quick_paste_hotkey() -> String {
+    // Avoid `Cmd + H` on macOS — that's the system-wide "Hide app"
+    // shortcut, intercepted by AppKit before our rdev listener can
+    // see the H keypress. With `Option + Cmd + H`, if the listener
+    // ever loses track of the Option modifier (synthetic event flows,
+    // some accessibility software, fast-tap timing) the OS falls
+    // back to plain `Cmd + H` and hides boothrflow instead of
+    // opening the palette. `Ctrl + Option + H` keeps the H mnemonic
+    // without overlapping any AppKit shortcut.
     if cfg!(target_os = "macos") {
-        "Option + Cmd + H".into()
+        "Ctrl + Option + H".into()
     } else {
-        "Alt + Win + H".into()
+        "Ctrl + Alt + H".into()
     }
 }
 
@@ -831,6 +855,24 @@ mod tests {
             ..HotkeySettings::default()
         };
         validate_hotkey_bindings(&hotkeys).unwrap();
+    }
+
+    #[test]
+    fn migrate_rewrites_legacy_quickpaste_default() {
+        let mut settings = AppSettings::default();
+        settings.hotkeys.quick_paste = "Option + Cmd + H".into();
+        let migrated = migrate(settings);
+        assert_eq!(migrated.hotkeys.quick_paste, default_quick_paste_hotkey());
+        assert_ne!(migrated.hotkeys.quick_paste, "Option + Cmd + H");
+    }
+
+    #[test]
+    fn migrate_preserves_user_chosen_quickpaste_hotkey() {
+        let custom = "Ctrl + Shift + V".to_string();
+        let mut settings = AppSettings::default();
+        settings.hotkeys.quick_paste = custom.clone();
+        let migrated = migrate(settings);
+        assert_eq!(migrated.hotkeys.quick_paste, custom);
     }
 
     #[test]

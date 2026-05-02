@@ -4,6 +4,7 @@
   import ListenPill from "$lib/components/ListenPill.svelte";
   import {
     dictationHotkeyLabel,
+    isMacPlatform,
     isTauri,
     quickPasteHotkeyLabel,
     toggleDictationHotkeyLabel,
@@ -126,7 +127,7 @@
   // attributed to the parent terminal and the user has to relaunch it
   // after granting. We probe the mic on load and surface the State Settings
   // panes on demand so the user isn't hunting through System Preferences.
-  const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+  const isMac = isMacPlatform();
   let micAvailable = $state<boolean | null>(null);
   let permissionsDismissed = $state(false);
   let settingsOpen = $state(false);
