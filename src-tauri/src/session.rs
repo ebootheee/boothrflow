@@ -46,6 +46,39 @@ mod real {
     use crate::stt::{StreamingTranscriber, SttEngine, SttResult, WhisperSttEngine};
     use crate::tray;
 
+    /// STT engine selected at runtime. Wave 5c added Parakeet alongside
+    /// the existing Whisper path; the variant determines which
+    /// `transcribe()` impl runs and whether the streaming partial
+    /// pipeline can be wired (whisper-only today — Parakeet streaming
+    /// is a Wave 5d enhancement against `stt::streaming::LocalAgreement2`).
+    enum LoadedStt {
+        Whisper(WhisperSttEngine),
+        #[cfg(feature = "parakeet-engine")]
+        Parakeet(crate::stt::ParakeetSttEngine),
+    }
+
+    impl LoadedStt {
+        fn transcribe(&self, audio: &[f32]) -> crate::error::Result<SttResult> {
+            match self {
+                Self::Whisper(e) => e.transcribe(audio),
+                #[cfg(feature = "parakeet-engine")]
+                Self::Parakeet(e) => e.transcribe(audio),
+            }
+        }
+
+        /// Whisper-typed handle, for streaming partials. Returns `None`
+        /// when Parakeet (or any future non-streaming engine) is the
+        /// active variant — the session loop interprets that as
+        /// "no partials this dictation".
+        fn as_whisper(&self) -> Option<&WhisperSttEngine> {
+            match self {
+                Self::Whisper(e) => Some(e),
+                #[cfg(feature = "parakeet-engine")]
+                Self::Parakeet(_) => None,
+            }
+        }
+    }
+
     #[derive(Debug, Clone, Serialize)]
     struct DictationFormatted {
         raw: String,
@@ -130,9 +163,11 @@ mod real {
         let context_detector = RealContextDetector::new();
         let learning = build_learning_coordinator(settings_store.clone());
 
-        // Whisper is hot-swappable from Settings. Load once at startup, then
-        // reload on the next press if the configured model file changes.
-        let mut stt: Option<WhisperSttEngine> = None;
+        // STT engine is hot-swappable from Settings. Load once at startup,
+        // then reload on the next press if the configured model file
+        // changes. Variant (Whisper vs. Parakeet) is determined per-load
+        // based on the current `whisper_model` setting value.
+        let mut stt: Option<LoadedStt> = None;
         let mut stt_model_file: Option<String> = None;
         ensure_stt_loaded(&app, &mut stt, &mut stt_model_file);
 
@@ -204,8 +239,14 @@ mod real {
                     // produces the same transcript on release.
                     ensure_stt_loaded(&app, &mut stt, &mut stt_model_file);
 
-                    let streaming =
-                        stt.as_ref().and_then(|engine| {
+                    // Streaming partials are whisper-only today —
+                    // `as_whisper()` returns `None` when Parakeet is
+                    // active, which the loop interprets as
+                    // "no partials this dictation".
+                    let streaming = stt
+                        .as_ref()
+                        .and_then(LoadedStt::as_whisper)
+                        .and_then(|engine| {
                             match StreamingTranscriber::spawn(
                                 engine.shared_context(),
                                 engine.initial_prompt().map(|s| s.to_string()),
@@ -320,7 +361,7 @@ mod real {
 
     fn ensure_stt_loaded(
         app: &AppHandle,
-        stt: &mut Option<WhisperSttEngine>,
+        stt: &mut Option<LoadedStt>,
         loaded_model_file: &mut Option<String>,
     ) {
         let model_file = settings::current_whisper_model_file();
@@ -331,15 +372,51 @@ mod real {
         *stt = None;
         *loaded_model_file = None;
 
-        let path = match crate::stt::default_models_dir() {
-            Some(dir) => dir.join(&model_file),
+        let models_dir = match crate::stt::default_models_dir() {
+            Some(dir) => dir,
             None => {
                 let msg = "could not resolve user data directory";
-                tracing::warn!("whisper not available: {msg}");
+                tracing::warn!("stt not available: {msg}");
                 let _ = app.emit("dictation:model-missing", msg);
                 return;
             }
         };
+
+        // Parakeet vs. Whisper: the current settings value carries the
+        // model identifier, not a flag. We dispatch by name. The
+        // settings option for Parakeet is gated on the
+        // `parakeet-engine` cargo feature, so we only see the
+        // identifier here when the engine is actually compiled in.
+        let model_value = settings::current_app_settings().whisper.model;
+
+        if model_value == "parakeet-tdt-0.6b-v3" {
+            #[cfg(feature = "parakeet-engine")]
+            {
+                let dir = models_dir.join(&model_file);
+                match crate::stt::ParakeetSttEngine::from_model_dir(&dir) {
+                    Ok(engine) => {
+                        tracing::info!("parakeet: loaded from {}", dir.display());
+                        *stt = Some(LoadedStt::Parakeet(engine));
+                        *loaded_model_file = Some(model_file);
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("parakeet not available: {e}");
+                        let _ = app.emit("dictation:model-missing", e.to_string());
+                        return;
+                    }
+                }
+            }
+            #[cfg(not(feature = "parakeet-engine"))]
+            {
+                let msg = "Parakeet selected but binary built without `parakeet-engine` feature";
+                tracing::warn!("{msg}");
+                let _ = app.emit("dictation:model-missing", msg);
+                return;
+            }
+        }
+
+        let path = models_dir.join(&model_file);
         let name = std::path::Path::new(&model_file)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -349,7 +426,7 @@ mod real {
         match WhisperSttEngine::from_path(&path, name) {
             Ok(engine) => {
                 tracing::info!("whisper: model loaded ({model_file})");
-                *stt = Some(engine);
+                *stt = Some(LoadedStt::Whisper(engine));
                 *loaded_model_file = Some(model_file);
             }
             Err(e) => {
@@ -390,7 +467,7 @@ mod real {
     #[allow(clippy::too_many_arguments)]
     fn transcribe_and_emit(
         app: &AppHandle,
-        engine: &WhisperSttEngine,
+        engine: &LoadedStt,
         injector: Option<&ClipboardInjector>,
         history: Option<&HistoryStore>,
         context_detector: &dyn ContextDetector,

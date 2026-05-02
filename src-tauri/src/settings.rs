@@ -550,16 +550,22 @@ pub fn whisper_models() -> Vec<WhisperModel> {
             detail: "Best local quality option for strong Macs.",
             download_arg: "large-v3-turbo",
         },
-        // NVIDIA Parakeet TDT 0.6B v3 — listed as a roadmap signal so the
-        // user can see the upcoming engine pivot. Disabled in the picker
-        // until the sherpa-onnx integration in Wave 5+ wires the actual
-        // inference path. See ADR-009.
+        // NVIDIA Parakeet TDT 0.6B v3 — wired via sherpa-onnx behind
+        // the `parakeet-engine` Cargo feature. Selectability mirrors the
+        // build configuration: when the binary was built without the
+        // feature, the FE picker disables this row so users see why
+        // it's there but can't accidentally pick a non-functional path.
+        // See ADR-009 + `docs/waves/wave-5-context-aware-cleanup.md`.
         WhisperModel {
             value: "parakeet-tdt-0.6b-v3",
-            file: "parakeet-tdt-0.6b-v3.onnx",
-            available: false,
-            label: "NVIDIA Parakeet TDT 0.6B v3 (coming soon — Wave 5+)",
-            detail: "Faster + more accurate than Whisper, native streaming. Wired via sherpa-onnx in a later wave.",
+            // Treated as a directory (not a single file) — see
+            // `parakeet_model_dir()`. Filename here is a sentinel for
+            // the resolution layer; the real model layout is
+            // `${dir}/{encoder,decoder,joiner}.onnx + tokens.txt`.
+            file: "parakeet-tdt-0.6b-v3",
+            available: cfg!(feature = "parakeet-engine"),
+            label: "NVIDIA Parakeet TDT 0.6B v3 (preview)",
+            detail: "Faster + more accurate than Whisper. Requires `pnpm download:model parakeet` and `--features parakeet-engine` build.",
             download_arg: "parakeet",
         },
     ]

@@ -63,6 +63,10 @@ real-engines = [
   "dep:rusqlite_migration",
   "dep:chrono",
 ]
+# Off by default — pulls a sizable C++ sherpa-onnx binary download +
+# the ONNX runtime. Opt in with `--features parakeet-engine` once the
+# user has run `pnpm download:model:mac parakeet`.
+parakeet-engine = ["dep:sherpa-rs"]
 win32-headed = []
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -170,6 +174,14 @@ voice_activity_detector = { version = "0.2", optional = true }
 whisper-rs = { version = "0.16", optional = true }
 dirs = { version = "5", optional = true }
 
+# STT (Wave 5c) — Parakeet TDT 0.6B v3 via sherpa-onnx. Off by default;
+# opted in via `parakeet-engine` feature so a baseline build doesn't
+# download the ~150MB sherpa-onnx prebuilt + ONNX runtime archive.
+# `download-binaries` skips the cmake build by fetching a prebuilt
+# binary; gracefully falls back to source build when the prebuilt
+# isn't available for the target.
+sherpa-rs = { version = "0.6", optional = true, default-features = false, features = ["download-binaries"] }
+
 # LLM (P2 W4) — out-of-process via OpenAI-compatible HTTP API.
 # In-process llama-cpp-2 was attempted but conflicts with whisper-rs-sys:
 # both statically link different ggml versions (LNK2005). The HTTP path
@@ -213,6 +225,14 @@ objc2-app-kit = { version = "0.3", features = [
   "NSWorkspace",
   "libc",
 ] }
+
+# Accessibility API for the post-paste learning coordinator. Reads the
+# focused text field's value via AXUIElement / kAXValueAttribute. Same
+# permission scope as the existing `enigo` paste injection (already
+# granted), so no additional TCC prompt.
+accessibility = "0.2"
+accessibility-sys = "0.2"
+core-foundation = "0.10"
 
 # Auto-enable Whisper Metal backend on Apple Silicon. The base whisper-rs
 # declaration above carries no GPU features; this target-specific override

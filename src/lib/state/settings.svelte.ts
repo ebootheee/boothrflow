@@ -96,10 +96,10 @@ const defaultOptions: SettingsOptions = {
     },
     {
       value: "parakeet-tdt-0.6b-v3",
-      label: "NVIDIA Parakeet TDT 0.6B v3 (coming soon — Wave 5+)",
+      label: "NVIDIA Parakeet TDT 0.6B v3 (preview)",
       detail:
-        "Faster + more accurate than Whisper, native streaming. Wired via sherpa-onnx in a later wave.",
-      file: "parakeet-tdt-0.6b-v3.onnx",
+        "Faster + more accurate than Whisper. Requires `pnpm download:model parakeet` and `--features parakeet-engine` build.",
+      file: "parakeet-tdt-0.6b-v3",
       available: false,
     },
   ],

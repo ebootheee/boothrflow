@@ -39,3 +39,8 @@ pub use whisper::{
 pub mod streaming;
 #[cfg(feature = "real-engines")]
 pub use streaming::{StreamingPartial, StreamingTranscriber};
+
+#[cfg(feature = "parakeet-engine")]
+pub mod parakeet;
+#[cfg(feature = "parakeet-engine")]
+pub use parakeet::ParakeetSttEngine;

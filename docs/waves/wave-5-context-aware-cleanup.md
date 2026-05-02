@@ -29,28 +29,58 @@ before you start; the pieces depend on each other.
 
 ## What's already shipped on this branch
 
+**Wave 5a:**
+
 - `src-tauri/src/llm/prompt.rs` — pure builder with unit tests covering
   legacy match, corrections-block emission, OCR truncation, the
   Captain's Log path, and app-context formatting. Order is stable so
   Ollama prompt-prefix caching has a long shared prefix.
-- `src-tauri/src/llm/openai_compat.rs` — sends `keep_alive: "5m"` so the
-  KV cache + model weights stay warm across consecutive dictations
-  (Ollama-specific extra; OpenAI-compat layer ignores fields it doesn't
-  recognize, harmless on cloud BYOK).
-- `src-tauri/src/context/real.rs` — production foreground-app detector.
-  macOS: `NSWorkspace::sharedWorkspace().frontmostApplication()` →
-  bundle ID + localized name. Windows: `GetForegroundWindow` +
-  `GetWindowTextW` + `K32GetModuleFileNameExW`. Linux: stub.
-- `src-tauri/src/session.rs` — wires the detector + a privacy-mode-gated
-  call to `crate::ocr::capture_focused_window_text` into the cleanup
-  request, parses `vocabulary` into `preferred_transcriptions`, and
-  passes `commonly_misheard` straight through.
-- `src-tauri/src/settings.rs` — `MisheardReplacement` struct,
-  `commonly_misheard: Vec<MisheardReplacement>`, `cleanup_window_ocr:
-bool`, both wired through `SettingsPatch` + `Default` + `load` +
+- `src-tauri/src/llm/openai_compat.rs` — sends `keep_alive: "5m"` to
+  Ollama (port :11434) so the KV cache + model weights stay warm
+  across consecutive dictations. Heuristic narrowed to port 11434 so
+  LM Studio (:1234) and llama-server (:8080) aren't broken by the
+  unknown-field rejection.
+- `src-tauri/src/context/real.rs` — production foreground-app detector
+  on macOS + Windows.
+- `src-tauri/src/settings.rs` — `MisheardReplacement` struct +
+  `commonly_misheard` + `cleanup_window_ocr` + `auto_learn_corrections`
+  fields, all wired through `SettingsPatch` / `Default` / `load` /
   `save_all`.
-- `src/App.svelte` — Misheard-replacements editor in the Recognition
-  section; OCR opt-in toggle in the LLM section.
+- Settings UI: misheard-replacements editor, OCR opt-in toggle,
+  auto-learn opt-in toggle, Screen Recording permission row.
+
+**Wave 5b:**
+
+- `src-tauri/src/learning/` — `detect_correction` heuristic (token-level
+  diff, single-word swaps, low-distance, rejects capitalization /
+  short / long / multi-word edits). `LearningCoordinator` spawns a
+  per-paste observation thread that re-checks the opt-in flag after
+  the settling window. FIFO-caps `commonly_misheard` at 50 entries.
+- `llm::prompt::sanitize_ocr` — replaces `<` / `>` with U+2039 /
+  U+203A so OCR'd text can't close `<WINDOW-OCR-CONTENT>` and inject
+  fake instructions. Collapses whitespace and strips zero-width chars.
+
+**Wave 5c:**
+
+- `src-tauri/src/learning/macos.rs` — real macOS Accessibility-API
+  read of the focused field's text via `AXUIElementCopyAttributeValue`
+  (`kAXValueAttribute`, fallback to `kAXSelectedTextAttribute`).
+  Wraps the unsafe block in `catch_unwind` so a misbehaving AX call
+  can't kill the learning thread. Drops in cleanly behind the
+  `MacosFocusedTextReader` trait the coordinator already uses.
+- `src-tauri/src/stt/parakeet.rs` — `ParakeetSttEngine` over
+  sherpa-onnx via the `sherpa-rs` crate. Behind the `parakeet-engine`
+  Cargo feature so the baseline build doesn't pull the ~150MB
+  prebuilt sherpa-onnx + ONNX runtime download. Loads from a
+  multi-file model directory: `encoder.onnx` / `decoder.onnx` /
+  `joiner.onnx` / `tokens.txt`.
+- `src-tauri/src/session.rs::LoadedStt` — engine enum that lets the
+  daemon route to Whisper or Parakeet at runtime based on the user's
+  model selection. Streaming partials remain whisper-only via
+  `LoadedStt::as_whisper`; Parakeet falls through to "no partials,
+  final transcript only" — a Wave 5d enhancement integrates with
+  `stt::streaming::LocalAgreement2`.
+
 - TS bindings regenerated (`pnpm gen` /
   `cargo run --example export_bindings --features real-engines`).
 
