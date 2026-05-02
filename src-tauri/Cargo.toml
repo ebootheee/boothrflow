@@ -234,6 +234,35 @@ accessibility = "0.2"
 accessibility-sys = "0.2"
 core-foundation = "0.10"
 
+# Vision framework for the focused-window OCR cleanup-context feature.
+# Uses CGDisplayCreateImage (deprecated as of macOS 14.4 but still
+# functional) for the screen capture, then VNRecognizeTextRequest for
+# the OCR pass. Requires Screen Recording TCC at runtime; capture
+# returns None on permission denial and the cleanup proceeds without
+# the OCR block. Wave 5d should pivot to ScreenCaptureKit before the
+# deprecated APIs are removed in a future macOS major.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+  "NSArray",
+  "NSDictionary",
+  "NSError",
+  "NSString",
+  "NSValue",
+] }
+objc2-core-graphics = { version = "0.3", features = [
+  "CGImage",
+  "CGDirectDisplay",
+  "CGGeometry",
+] }
+objc2-vision = { version = "0.3", features = [
+  "VNRequest",
+  "VNRecognizeTextRequest",
+  "VNObservation",
+  "VNRequestHandler",
+  "VNTypes",
+  "objc2-core-graphics",
+] }
+
 # Auto-enable Whisper Metal backend on Apple Silicon. The base whisper-rs
 # declaration above carries no GPU features; this target-specific override
 # adds `metal` only when compiling for aarch64-apple-darwin. Cargo merges
