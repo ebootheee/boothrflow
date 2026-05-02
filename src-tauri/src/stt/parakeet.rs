@@ -73,7 +73,13 @@ impl ParakeetSttEngine {
         // process down. Pre-check the decoder file here so we fail
         // gracefully (Err propagates up to `dictation:model-missing`,
         // session daemon stays alive, user can pick another engine).
-        validate_decoder_metadata(&decoder)?;
+        //
+        // Set `BOOTHRFLOW_SKIP_PARAKEET_GUARD=1` to bypass — only
+        // useful when probing whether a specific sherpa-onnx version
+        // tolerates the missing metadata.
+        if std::env::var("BOOTHRFLOW_SKIP_PARAKEET_GUARD").is_err() {
+            validate_decoder_metadata(&decoder)?;
+        }
 
         let config = TransducerConfig {
             encoder: encoder.to_string_lossy().into_owned(),
@@ -84,9 +90,16 @@ impl ParakeetSttEngine {
             feature_dim: PARAKEET_FEATURE_DIM,
             decoding_method: DEFAULT_DECODING.into(),
             num_threads: num_cpus_clamped(),
-            // `transducer` is the right model_type for Parakeet TDT.
-            // sherpa-onnx auto-detects but explicit is safer.
-            model_type: "transducer".into(),
+            // Leave model_type empty so sherpa-onnx auto-detects
+            // from the encoder ONNX metadata (model_type=
+            // "EncDecRNNTBPEModel" for Parakeet TDT). Setting it
+            // to "transducer" explicitly here sent sherpa-onnx down
+            // the generic-transducer loader instead of the NeMo TDT
+            // loader and tripped a C++ exception during decode.
+            model_type: String::new(),
+            // Verbose sherpa-onnx logs — useful while we're shaking
+            // out the bundle prep flow. Flip via env var if needed.
+            debug: std::env::var("BOOTHRFLOW_PARAKEET_DEBUG").is_ok(),
             ..Default::default()
         };
 
@@ -178,11 +191,11 @@ fn validate_decoder_metadata(decoder_path: &Path) -> Result<()> {
     if !found {
         return Err(BoothError::internal(
             "parakeet: decoder.onnx is missing the `vocab_size` metadata \
-             key required by sherpa-onnx 1.10+. The bundle published as \
-             sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8 was built before \
-             that requirement landed; sherpa-onnx will exit(-1) during \
-             decode if loaded. See docs/waves/wave-5-context-aware-cleanup.md \
-             for the bundle-rebuild plan. Falling back to Whisper.",
+             key required by sherpa-onnx 1.10+. Re-run \
+             `pnpm download:model:mac parakeet` so the bundle prep step \
+             (scripts/parakeet-propagate-metadata.py) can patch the \
+             decoder + joiner files with metadata copied from the \
+             encoder. Falling back to Whisper for now.",
         ));
     }
     Ok(())

@@ -537,6 +537,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "sherpa-rs",
+ "sherpa-rs-sys",
  "specta",
  "specta-typescript",
  "tauri",

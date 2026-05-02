@@ -31,6 +31,13 @@ required-features = ["real-engines"]
 [[example]]
 name = "export_bindings"
 
+# Probe that loads the Parakeet model and runs a synthetic decode.
+# Lets us validate sherpa-onnx version compatibility with the
+# downloaded model bundle without firing up the full Tauri runtime.
+[[example]]
+name = "parakeet_probe"
+required-features = ["real-engines", "parakeet-engine"]
+
 # ──────────────────────────────────────────────────────────────────────────
 # Features
 #
@@ -66,7 +73,7 @@ real-engines = [
 # Off by default — pulls a sizable C++ sherpa-onnx binary download +
 # the ONNX runtime. Opt in with `--features parakeet-engine` once the
 # user has run `pnpm download:model:mac parakeet`.
-parakeet-engine = ["dep:sherpa-rs"]
+parakeet-engine = ["dep:sherpa-rs", "dep:sherpa-rs-sys"]
 win32-headed = []
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -180,7 +187,13 @@ dirs = { version = "5", optional = true }
 # `download-binaries` skips the cmake build by fetching a prebuilt
 # binary; gracefully falls back to source build when the prebuilt
 # isn't available for the target.
-sherpa-rs = { version = "0.6", optional = true, default-features = false, features = ["download-binaries"] }
+sherpa-rs = { version = "=0.6.8", optional = true, default-features = false, features = ["download-binaries"] }
+# Pin sherpa-rs-sys to match sherpa-rs's expected layout. sherpa-rs
+# declares a caret-version on sherpa-rs-sys "0.6.5" which resolves
+# up to 0.6.8 (which added a `hr` field that 0.6.5's wrapper code
+# doesn't initialize). Forcing the exact patch keeps the wrapper
+# matched to the sys struct shape.
+sherpa-rs-sys = { version = "=0.6.8", optional = true, default-features = false, features = ["download-binaries"] }
 
 # LLM (P2 W4) — out-of-process via OpenAI-compatible HTTP API.
 # In-process llama-cpp-2 was attempted but conflicts with whisper-rs-sys:

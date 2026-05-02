@@ -45,22 +45,6 @@ if [[ "${arg}" == "parakeet" ]]; then
     exit 0
   fi
 
-  cat <<'WARN'
-
-⚠ Heads up: the only Parakeet ONNX bundle currently published on the
-  sherpa-onnx asr-models GitHub release tag is v2-int8, built before
-  sherpa-onnx 1.10 added a required `vocab_size` metadata field. Our
-  ParakeetSttEngine pre-checks for this and refuses to load — meaning
-  the toggle in Settings will surface a "model missing" error and the
-  daemon will keep using Whisper. Tracking a working bundle rebuild
-  in docs/waves/wave-5-context-aware-cleanup.md (Wave 5f).
-
-  Downloading anyway so the layout exists for when a fixed bundle
-  drops; the metadata guard will start passing automatically once
-  the files contain `vocab_size`.
-
-WARN
-
   bundle_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
   url="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${bundle_name}.tar.bz2"
   archive="${dest_dir}/${bundle_name}.tar.bz2"
@@ -86,16 +70,39 @@ WARN
   cp "${src_dir}"/tokens.txt    "${bundle_dir}/tokens.txt"
   rm -rf "${src_dir}"
 
+  # Patch the bundle's decoder + joiner ONNX files to carry the
+  # ASR metadata sherpa-onnx 1.10+ checks for. The published v2-int8
+  # bundle puts `vocab_size`/`pred_rnn_layers`/etc. only on encoder.onnx,
+  # but newer sherpa-onnx wants them on the decoder too — without
+  # this the C++ side throws during decode. The Python script reads
+  # encoder.onnx, copies its metadata onto the other two, and
+  # injects a `context_size=2` constant (NeMo TDT default).
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  patcher="${script_dir}/parakeet-propagate-metadata.py"
+  if ! python3 -c "import onnx" 2>/dev/null; then
+    echo
+    echo "Installing the `onnx` Python package (one-time, ~80MB) so we"
+    echo "can patch the model bundle's metadata for sherpa-onnx 1.10+:"
+    python3 -m pip install --user --break-system-packages --quiet onnx \
+      || {
+        echo "error: pip install onnx failed; install it manually then re-run" >&2
+        exit 1
+      }
+  fi
+  python3 "${patcher}" "${bundle_dir}" \
+    || {
+      echo "error: metadata propagation failed — see traceback above" >&2
+      exit 1
+    }
+
+  echo
   echo "done. Parakeet model installed at ${bundle_dir}"
   echo
   echo "Next steps:"
-  echo "  1. Rebuild with the parakeet-engine feature:"
-  echo "       cargo build --manifest-path src-tauri/Cargo.toml \\"
-  echo "         --features \"real-engines parakeet-engine\""
-  echo "     or with pnpm tauri:"
-  echo "       pnpm tauri build -- --features \"parakeet-engine\""
-  echo "  2. Launch boothrflow and pick Parakeet TDT 0.6B v3 (preview)"
-  echo "     in Settings → Voice → Whisper model."
+  echo "  1. Run with the parakeet-engine feature:"
+  echo "       pnpm dev:parakeet"
+  echo "  2. In Settings → Voice → Recognition, pick"
+  echo "     'NVIDIA Parakeet TDT 0.6B v3 (preview)'."
   exit 0
 fi
 
