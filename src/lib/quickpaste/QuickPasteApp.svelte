@@ -103,7 +103,12 @@
 
 <style>
   :global(html),
-  :global(body) {
+  :global(body),
+  :global(#app) {
+    /* The shared app.css applies a light background to #app for the
+       Settings window. Override here so the quickpaste window's
+       rounded corners reveal the transparent background underneath
+       instead of the white square inherited from the shared style. */
     background: transparent !important;
     margin: 0;
     padding: 0;

@@ -253,6 +253,7 @@ objc2-core-graphics = { version = "0.3", features = [
   "CGImage",
   "CGDirectDisplay",
   "CGGeometry",
+  "CGWindow",
 ] }
 objc2-vision = { version = "0.3", features = [
   "VNRequest",

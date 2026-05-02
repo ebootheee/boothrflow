@@ -112,6 +112,41 @@ fn run_listener(tx: Sender<HotkeyEvent>) {
 
         let (snapshot, fresh_press) = {
             let mut pressed = cb_pressed.lock();
+            // Tap chords (quick-paste, toggle) trigger on a non-modifier
+            // KeyPress while modifiers are held. Symbol keys ("H" for
+            // quick-paste) are racy on macOS — the rdev listener can
+            // miss the leading modifier-down events when the app is
+            // first launched, leaving Option+Cmd absent from `pressed`.
+            // The heartbeat resyncs every 150ms but a fast user beats
+            // it. Eagerly resync from the OS *now* on a fresh press of
+            // any non-modifier key, so the snapshot we hand to
+            // `fired_by` reflects reality. Cheap (one syscall).
+            #[cfg(target_os = "macos")]
+            if is_press && !is_modifier_key(key) {
+                let flags = unsafe {
+                    cg_modifiers::CGEventSourceFlagsState(cg_modifiers::COMBINED_SESSION_STATE)
+                };
+                set_modifier_keys(
+                    &mut pressed,
+                    &[Key::ControlLeft, Key::ControlRight],
+                    (flags & cg_modifiers::FLAG_CONTROL) != 0,
+                );
+                set_modifier_keys(
+                    &mut pressed,
+                    &[Key::MetaLeft, Key::MetaRight],
+                    (flags & cg_modifiers::FLAG_COMMAND) != 0,
+                );
+                set_modifier_keys(
+                    &mut pressed,
+                    &[Key::Alt, Key::AltGr],
+                    (flags & cg_modifiers::FLAG_ALTERNATE) != 0,
+                );
+                set_modifier_keys(
+                    &mut pressed,
+                    &[Key::ShiftLeft, Key::ShiftRight],
+                    (flags & cg_modifiers::FLAG_SHIFT) != 0,
+                );
+            }
             let fresh_press = if is_press {
                 pressed.insert(key)
             } else {
@@ -351,6 +386,22 @@ fn spawn_modifier_resync_macos(
             }
         })
         .ok();
+}
+
+#[cfg(target_os = "macos")]
+fn is_modifier_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::ControlLeft
+            | Key::ControlRight
+            | Key::MetaLeft
+            | Key::MetaRight
+            | Key::Alt
+            | Key::AltGr
+            | Key::ShiftLeft
+            | Key::ShiftRight
+            | Key::Function
+    )
 }
 
 #[cfg(target_os = "macos")]

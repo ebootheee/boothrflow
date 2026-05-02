@@ -48,6 +48,24 @@ export const commands = {
 	 */
 	microphoneAvailable: () => __TAURI_INVOKE<boolean>("microphone_available"),
 	/**
+	 *  Probe whether Screen Recording TCC is currently granted, without
+	 *  triggering the OS prompt. Returns `true` on non-macOS (no-op) so
+	 *  the FE doesn't need to branch — the OCR feature itself is gated
+	 *  at runtime by the actual capture call.
+	 */
+	screenRecordingAvailable: () => __TAURI_INVOKE<boolean>("screen_recording_available"),
+	/**
+	 *  Eagerly request Screen Recording permission so the OS prompt
+	 *  fires now (rather than the first time the cleanup pass tries an
+	 *  OCR capture mid-dictation, which is the worst possible moment).
+	 *  Returns whether access is granted afterwards. The OS prompt only
+	 *  appears once per app per macOS reset; subsequent calls just
+	 *  return the current state. Calls `CGRequestScreenCaptureAccess()`
+	 *  which both prompts and registers the app in System Settings →
+	 *  Privacy & Security → Screen Recording.
+	 */
+	requestScreenRecordingPermission: () => __TAURI_INVOKE<boolean>("request_screen_recording_permission"),
+	/**
 	 *  Report which Whisper model file the daemon will load (or already loaded).
 	 *  The UI uses this to show "tiny.en" / "base.en" / "small.en" rather than a
 	 *  hardcoded label, so the chip stays honest after the user swaps models via

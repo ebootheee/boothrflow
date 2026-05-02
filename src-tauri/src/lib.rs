@@ -35,8 +35,9 @@ pub mod vad;
 
 use commands::{
     app_version, dictate_once, llm_test_connection, microphone_available, open_macos_setting,
-    reveal_path, set_dictation_style, settings_export, settings_get, settings_import,
-    settings_options, settings_update, whisper_download_model, whisper_model_name,
+    request_screen_recording_permission, reveal_path, screen_recording_available,
+    set_dictation_style, settings_export, settings_get, settings_import, settings_options,
+    settings_update, whisper_download_model, whisper_model_name,
 };
 use tauri::Manager;
 use tauri::WindowEvent;
@@ -70,6 +71,8 @@ pub fn build_specta() -> SpectaBuilder<tauri::Wry> {
         quickpaste_close,
         open_macos_setting,
         microphone_available,
+        screen_recording_available,
+        request_screen_recording_permission,
         whisper_model_name,
         settings_get,
         settings_update,
@@ -90,6 +93,8 @@ pub fn build_specta() -> SpectaBuilder<tauri::Wry> {
         set_dictation_style,
         open_macos_setting,
         microphone_available,
+        screen_recording_available,
+        request_screen_recording_permission,
         whisper_model_name,
         settings_get,
         settings_update,

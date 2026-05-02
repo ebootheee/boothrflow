@@ -247,6 +247,21 @@ function createSettings() {
     return invoke("llm_test_connection");
   }
 
+  /// Trigger the macOS Screen Recording permission prompt and return
+  /// whether access is currently granted. No-op on non-macOS. Also
+  /// has the side-effect of registering the app in System Settings →
+  /// Privacy & Security → Screen Recording (without this call, the
+  /// app doesn't appear in that list at all).
+  async function requestScreenRecordingPermission(): Promise<boolean> {
+    if (!isTauri()) return true;
+    const { invoke } = await import("@tauri-apps/api/core");
+    try {
+      return await invoke<boolean>("request_screen_recording_permission");
+    } catch {
+      return false;
+    }
+  }
+
   async function getAppVersion(): Promise<string> {
     if (!isTauri()) return "0.0.0-web";
     const { invoke } = await import("@tauri-apps/api/core");
@@ -330,6 +345,7 @@ function createSettings() {
     exportJson,
     importJson,
     testLlmConnection,
+    requestScreenRecordingPermission,
     getAppVersion,
     revealPath,
     getAutostartEnabled,

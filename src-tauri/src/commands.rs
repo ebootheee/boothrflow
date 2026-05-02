@@ -258,6 +258,46 @@ pub fn microphone_available() -> bool {
     true
 }
 
+/// Probe whether Screen Recording TCC is currently granted, without
+/// triggering the OS prompt. Returns `true` on non-macOS (no-op) so
+/// the FE doesn't need to branch — the OCR feature itself is gated
+/// at runtime by the actual capture call.
+#[tauri::command]
+#[specta::specta]
+pub fn screen_recording_available() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_core_graphics::CGPreflightScreenCaptureAccess;
+        CGPreflightScreenCaptureAccess()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+/// Eagerly request Screen Recording permission so the OS prompt
+/// fires now (rather than the first time the cleanup pass tries an
+/// OCR capture mid-dictation, which is the worst possible moment).
+/// Returns whether access is granted afterwards. The OS prompt only
+/// appears once per app per macOS reset; subsequent calls just
+/// return the current state. Calls `CGRequestScreenCaptureAccess()`
+/// which both prompts and registers the app in System Settings →
+/// Privacy & Security → Screen Recording.
+#[tauri::command]
+#[specta::specta]
+pub fn request_screen_recording_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_core_graphics::CGRequestScreenCaptureAccess;
+        CGRequestScreenCaptureAccess()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
 /// Report which Whisper model file the daemon will load (or already loaded).
 /// The UI uses this to show "tiny.en" / "base.en" / "small.en" rather than a
 /// hardcoded label, so the chip stays honest after the user swaps models via
@@ -467,54 +507,56 @@ pub async fn llm_test_connection(
     use std::time::Instant;
     let app_settings = store.load()?;
     let llm = app_settings.llm;
-    let started = Instant::now();
-    // Build a transient client from the live settings (not the daemon's
-    // cached one — the user may have changed values without restarting).
-    let probe = OpenAiCompatLlmCleanup::new(
-        llm.endpoint.clone(),
-        llm.model.clone(),
-        llm.api_key
-            .as_ref()
-            .filter(|k| !k.trim().is_empty())
-            .cloned(),
-    );
-    let probe = match probe {
-        Ok(p) => p,
-        Err(e) => {
-            return Ok(LlmTestResult {
-                ok: false,
-                latency_ms: started.elapsed().as_millis() as u64,
-                error: Some(e.to_string()),
-            });
+    // The reqwest::blocking::Client owns an internal tokio runtime; if
+    // we construct it on the async caller's runtime worker thread and
+    // then drop it on that same thread, tokio panics with "Cannot drop
+    // a runtime in a context where blocking is not allowed". Construct
+    // AND drop the probe entirely inside spawn_blocking so the Client's
+    // runtime lives + dies on a blocking-allowed thread.
+    let join_result = tokio::task::spawn_blocking(move || -> (bool, u64, Option<String>) {
+        let started = Instant::now();
+        let probe = match OpenAiCompatLlmCleanup::new(
+            llm.endpoint.clone(),
+            llm.model.clone(),
+            llm.api_key
+                .as_ref()
+                .filter(|k| !k.trim().is_empty())
+                .cloned(),
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                return (
+                    false,
+                    started.elapsed().as_millis() as u64,
+                    Some(e.to_string()),
+                );
+            }
+        };
+        let result = probe
+            .cleanup(CleanupRequest {
+                raw_text: "ping",
+                style: crate::settings::Style::Raw,
+                ..Default::default()
+            })
+            .map(|_| ());
+        let latency_ms = started.elapsed().as_millis() as u64;
+        match result {
+            Ok(()) => (true, latency_ms, None),
+            Err(e) => (false, latency_ms, Some(e.to_string())),
         }
-    };
-    let join_result: std::result::Result<crate::error::Result<()>, tokio::task::JoinError> =
-        tokio::task::spawn_blocking(move || {
-            probe
-                .cleanup(CleanupRequest {
-                    raw_text: "ping",
-                    style: crate::settings::Style::Raw,
-                    ..Default::default()
-                })
-                .map(|_| ())
-        })
-        .await;
-    let latency_ms = started.elapsed().as_millis() as u64;
+    })
+    .await;
+
     match join_result {
-        Ok(Ok(())) => Ok(LlmTestResult {
-            ok: true,
+        Ok((ok, latency_ms, error)) => Ok(LlmTestResult {
+            ok,
             latency_ms,
-            error: None,
-        }),
-        Ok(Err(e)) => Ok(LlmTestResult {
-            ok: false,
-            latency_ms,
-            error: Some(e.to_string()),
+            error,
         }),
         Err(e) => Ok(LlmTestResult {
             ok: false,
-            latency_ms,
-            error: Some(e.to_string()),
+            latency_ms: 0,
+            error: Some(format!("test task failed: {e}")),
         }),
     }
 }

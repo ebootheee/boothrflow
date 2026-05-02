@@ -231,6 +231,17 @@
     }
   }
 
+  /// When the user turns OCR on, persist the setting AND trigger the
+  /// macOS Screen Recording permission prompt right away — so the OS
+  /// prompt fires from a clear "you just said yes to a feature" UX
+  /// moment, not mid-dictation. On non-macOS, only the persist runs.
+  async function toggleOcrAndPrompt(checked: boolean) {
+    await settings.update({ cleanup_window_ocr: checked });
+    if (checked && inDesktop) {
+      await settings.requestScreenRecordingPermission();
+    }
+  }
+
   async function refreshAppVersion() {
     if (!inDesktop) {
       appVersion = "0.0.0-web";
@@ -956,26 +967,6 @@
                     />
                   </label>
 
-                  <label class="toggle-row">
-                    <input
-                      type="checkbox"
-                      checked={settings.current.cleanup_window_ocr ?? false}
-                      onchange={(event) =>
-                        void settings.update({
-                          cleanup_window_ocr: event.currentTarget.checked,
-                        })}
-                    />
-                    <span>Use focused-window OCR as cleanup context (preview)</span>
-                  </label>
-                  <p class="settings-help">
-                    Captures the visible text of the focused window and feeds it to the cleanup
-                    prompt as supporting context — helps disambiguate names, models, and jargon that
-                    Whisper mishears. macOS requires Screen Recording permission. Disabled
-                    automatically when <em>Privacy mode</em> is on. The capture path is being
-                    finalized in a follow-up — see
-                    <code>docs/waves/wave-5-context-aware-cleanup.md</code>.
-                  </p>
-
                   <div class="settings-actions">
                     <button
                       class="quiet-button"
@@ -993,6 +984,22 @@
                       {/if}
                     {/if}
                   </div>
+
+                  <label class="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.current.cleanup_window_ocr ?? false}
+                      onchange={(event) => void toggleOcrAndPrompt(event.currentTarget.checked)}
+                    />
+                    <span>Use focused-window OCR as cleanup context (preview)</span>
+                  </label>
+                  <p class="settings-help">
+                    Captures the visible on-screen text and feeds it to the cleanup prompt as
+                    supporting context — helps disambiguate names, models, and jargon that Whisper
+                    mishears. Requires Screen Recording permission; turning this on triggers the
+                    macOS permission prompt now (rather than mid-dictation). Disabled automatically
+                    when <em>Privacy mode</em> is on.
+                  </p>
                 </section>
               {:else if activeSettingsSection === "whisper"}
                 <section class="settings-section">
@@ -1005,7 +1012,7 @@
                   </div>
 
                   <label class="settings-field">
-                    <span>Whisper model</span>
+                    <span>Speech-to-text model</span>
                     <select
                       value={settings.current.whisper.model}
                       onchange={(event) => void settings.setWhisperModel(event.currentTarget.value)}

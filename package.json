@@ -19,8 +19,10 @@
   },
   "scripts": {
     "dev": "tauri dev",
+    "dev:parakeet": "tauri dev --features parakeet-engine",
     "dev:msvc": "scripts\\cargo-msvc.bat pnpm exec tauri dev",
     "build": "tauri build",
+    "build:parakeet": "tauri build --features parakeet-engine",
     "build:msvc": "scripts\\cargo-msvc.bat pnpm exec tauri build",
     "download:model": "scripts\\download-model.bat",
     "download:model:mac": "scripts/download-model.sh",
