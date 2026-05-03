@@ -40,31 +40,119 @@ UAT checklist: [`docs/uat/wave-5-checklist.md`](./docs/uat/wave-5-checklist.md).
 
 ---
 
-## Near-term — Wave 6 candidates (next session)
+## Wave 6 — Production polish (next, locked in)
 
-Pick one. The first two are user-perceptible quality wins; the third is the prerequisite for distributing the app to anyone other than us.
+**Plan:** [`docs/waves/wave-6-production-polish.md`](./docs/waves/wave-6-production-polish.md). Six phases, 6-9 focused days total, each independently shippable.
 
-### Option A — **Structured / app-aware formatting** (auto-format style) `[medium]`
+**Goal:** turn boothrflow from "works on Eric's laptop in dev mode" into "anyone can download a signed installer, get prompted by the real app for permissions, and stay current via auto-update." Without this, every dev-mode TCC permission is owned by the parent terminal, the app doesn't appear correctly in System Settings → Privacy & Security panes, and there's no way to give the build to anyone (multi-hour clone-and-compile onboarding).
 
-Wispr Flow's killer differentiator: long dictations come back as actual structure (bullets when you spoke a list, paragraph breaks at sentence-boundary pauses, code fences when you said "in code", greeting + signature in Mail). Plumbing: extend the cleanup prompt with a structure-detection pass keyed on app context (Mail / Slack / Notion / IDE / generic) plus heuristics on the raw transcript ("first… second… third" → numbered list; >25s of speech → paragraph splits at sentence-boundary pause markers). Surfaces as a sixth Style ("Auto-format") that overrides tone-only styles when confidence is high; falls back to plain casual cleanup otherwise. Wave 5's app-context detection landed the prerequisite — this is the payoff.
+**Phases:**
 
-### Option B — **Production polish** (code signing + auto-update + onboarding wizard) `[medium]`
+1. **Release infrastructure** — `VERSION` file, GitHub Actions matrix build (macOS-arm64, macOS-x64, Windows-x64), `RELEASING.md` playbook, CHANGELOG → release-notes mapping.
+2. **macOS code signing + notarization** — Developer ID + `notarytool`. Replaces the dev-mode TCC dance with proper app attribution.
+3. **Windows code signing** — Azure Trusted Signing (cheap path) or EV cert. Quiets SmartScreen for the `.msi`.
+4. **Auto-update** — `tauri-plugin-updater` + GitHub Releases as the manifest server. Settings → About → "Check for updates" + background check + tray badge on available update.
+5. **Onboarding wizard** — first-launch flow walking through privacy callout, mic permission, accessibility/input-monitoring/screen-recording permissions, model download (with progress), hotkey config, LLM endpoint check.
+6. **Beta → Stable channels** — two release manifests (`latest-beta.json` / `latest.json`); promotion script; cadence rules in `RELEASING.md`.
 
-Required before the app can leave Eric's laptop. Three pieces:
+**After Wave 6:** every subsequent feature follows a **staging → stable** cadence. Feature branch → local UAT → beta tag → 3-7 day soak on Eric's daily driver → promote to stable. Hot-fix path goes direct to stable.
 
-- **Code signing** — Developer ID + notarization on macOS, Azure Trusted Signing on Windows. Without this, every dev-mode TCC permission is owned by the parent terminal and the app doesn't appear in System Settings → Privacy & Security panes (the friction Eric hit in Wave 5 UAT).
-- **Auto-update** — `tauri-plugin-updater` + GitHub Releases.
-- **Onboarding wizard** — model download progress, mic test, hotkey config, accessibility permissions walkthrough, Windows SmartScreen explainer.
+---
 
-### Option C — **Audio noise suppression** (RNNoise or DeepFilterNet 3) `[low–medium]`
+## After Wave 6 — Wave 7 candidates (queued)
 
-Insert as an optional pre-VAD stage in `audio/cpal_source.rs`. RNNoise is the safe default (Rust binding via `nnnoiseless`, ~85KB model, <1% CPU on M-series); DeepFilterNet is the upgrade path when we want non-stationary noise suppression. Pairs naturally with the Silero VAD already there: cleaner input → fewer false-positive speech frames at start/end of utterance, tighter endpointing. Toggle in Settings, default off in v0.
+Pick one (or stack low-cost ones). All deferred during Wave 6 production polish.
 
-### Option D — **Cleanup quality follow-ups** `[low]` (multiple small wins, can stack on the others)
+### Auto-format style `[medium]`
 
-- **Skip-LLM hotkey** — explicit "raw mode" for code dictation. One new hotkey row in Settings; per-press routing.
-- **Spelled-out word detection** — pre-cleanup pass that scans for `B-O-O-T-H-E` / `b o o t h e` / NATO phonetic / "spelled" cue phrases and emits an authoritative-spelling marker the LLM is told to honor. Closes the same loop as auto-learn from the other direction.
-- **OCR length-based gate** — skip OCR when raw_text > 500 chars (the OCR's marginal value drops as the spoken text gets longer; Wave 5 design-doc open question).
+Wispr Flow's killer differentiator. Long dictations come back as actual structure (bullets when you spoke a list, paragraph breaks at sentence-boundary pauses, code fences when you said "in code", greeting + signature in Mail). Surfaces as a sixth Style ("Auto-format") that overrides tone-only styles when app-context confidence is high. Wave 5's app-context detection landed the prerequisite.
+
+### Audio noise suppression `[low–medium]`
+
+RNNoise (Rust binding via `nnnoiseless`, ~85KB model) or DeepFilterNet 3 (upgrade path) as an optional pre-VAD stage in `audio/cpal_source.rs`. Pairs with Silero VAD already there: cleaner input → tighter endpointing. Toggle in Settings, default off.
+
+### Cleanup quality follow-ups `[low]` (stack-friendly)
+
+- **Skip-LLM hotkey** — explicit "raw mode" for code dictation. One new hotkey row in Settings.
+- **Spelled-out word detection** — pre-cleanup pass scans for `B-O-O-T-H-E` / `b o o t h e` / NATO phonetic / "spelled" cue phrases. Emits an authoritative-spelling marker the LLM is told to honor.
+- **OCR length-based gate** — skip OCR when raw_text > 500 chars (OCR's marginal value drops as spoken text gets longer).
+
+### Wave 5 carry-overs `[low–medium]`
+
+- Windows UIAutomation focused-field reader.
+- Windows OCR via `windows::Media::Ocr::OcrEngine`.
+- Parakeet streaming partials integration with `LocalAgreement2`.
+- ScreenCaptureKit pivot from the deprecated `CGDisplayCreateImage`.
+
+### Parakeet → default engine `[low]`
+
+Once Parakeet UAT (Wave 5) confirms parity-or-better cleanup quality at lower latency on M-series, flip the Rust default in `default_whisper_model()` and bundle Parakeet in the production installer. Whisper stays as the multilingual fallback. Naturally rides on Wave 6 — first stable release that ships with Parakeet built-in.
+
+---
+
+## Future ideas (post-Wave-7)
+
+Things that have come up and are worth queuing — not committed, just captured so they don't get lost.
+
+### Connectors — push dictations / embeddings to other tools
+
+The history store already has FTS5 + nomic-embed-text vectors per dictation. Currently the only consumer is in-app search. Surface that data outward via a connector trait:
+
+- **Obsidian vault push.** Configurable directory; each dictation lands as a markdown note with frontmatter (timestamp, app context, style, tags inferred from the cleanup pass). Embeddings ride along as YAML for later semantic search via Obsidian plugins. The auto-format style (Wave 7) is a natural feeder — bullet lists / paragraphs land cleanly.
+- **Custom HTTP webhook.** POST `{raw, formatted, embedding, timestamp, app_context}` to a user-configured URL. Catch-all for anyone wiring boothrflow into a personal automation pipeline.
+- **Slack / Linear / Notion / Gmail / Google Docs** — same trait, per-service auth + payload shape. v0 set is just Slack incoming webhooks + generic HTTP; richer integrations land progressively.
+- **Voice trigger.** Cleanup pass detects routing instructions inline ("push this to Slack", "send to email", "drop into the ops channel") and treats them as a `Connector::SendTo(target, payload)` instead of a paste. The instruction itself is stripped from the body.
+- **History row action.** Each row in the History panel grows a "Push to…" dropdown.
+
+Originally roadmapped under Phase 3 differentiators; promoted to "future idea" because the Obsidian path specifically is high-leverage for Eric's note-taking workflow and worth a focused wave once Wave 6 production polish lands.
+
+### Hyper-modern UI rebuild
+
+Current Settings panel is functional but not what you'd call "sexy." Candidates:
+
+- **Visual language refresh.** Pick a design system (e.g. shadcn/ui port to Svelte 5, or a custom system). Probably leans into the local-first aesthetic — confident typography, low-chrome, motion that feels alive without being annoying.
+- **Pill redesign.** Currently a rectangle with text inside. Could be a single pulsing dot during listening, transcript flowing out as a typewriter trail during cleaning, etc. The pill is the most-visible surface — worth investing in.
+- **Settings → polished onboarding.** After Wave 6 ships the wizard, the Settings UI itself can feel like a continuation of that polish rather than a separate aesthetic.
+- **Liquid glass / blur effects.** macOS-native vibe (Vibrancy, NSVisualEffectView). Tauri has limited support; might need `objc2-app-kit` calls into the WebKit window's contentView.
+- **Keyboard shortcuts everywhere.** Cmd-, opens Settings. Cmd-K opens command palette. Cmd-/ opens history search. Mode-aware focus states.
+
+Probably best as its own wave (Wave 8?) once the feature surface is stable.
+
+### Meeting transcription mode
+
+Continuous-recording meetings produce transcript + summary as markdown automatically. Big enough to be its own product surface (Phase 5 in the original PLAN.md). Briefly:
+
+- Dual-stream capture (mic + system audio) on macOS via ScreenCaptureKit, on Windows via WASAPI loopback.
+- 30-second chunks with 1-second overlap; disk-spilled so memory stays bounded over multi-hour meetings.
+- Speaker diarization post-meeting (pyannote-onnx or sherpa-onnx).
+- Summary via local LLM with a meeting-summary prompt.
+- Meeting markdowns get indexed by the same FTS5 + nomic-embed-text infra as dictations.
+
+Pairs naturally with the Obsidian connector (meetings → notes folder).
+
+### Plugin API
+
+Pre-STT, post-STT, pre-paste hooks. WASM-sandboxed so plugins can't read arbitrary disk / make network calls without explicit permission. Lets users wire custom transformations (e.g. "always replace `lol` with `haha`," "convert numbers to digits in coding contexts") without forking the app.
+
+### Insights dashboard
+
+Words/day, accuracy delta over time, top apps used in, rating trend (depends on the rating tool from Phase 3). Local-only — never leaves the machine.
+
+### Snippets / voice-activated text expanders
+
+"Insert standup" → boothrflow expands to your standup template. Triggered by voice during dictation (rather than typing the trigger string). Adjacent to the connector idea: snippets as a special kind of insert.
+
+### Voice commands in dictation
+
+"press enter", "new line", "delete that", "select all" parsed mid-dictation and translated to keystroke sequences. Different from Command Mode (which is a separate hold-to-speak transformation gesture). Small finite parser.
+
+### Privacy audit doc
+
+Ship `PRIVACY_AUDIT.md` containing the exact prompt to feed an AI assistant to verify all default features are 100% local, plus a checklist with file pointers and pass/fail. Cheap to author, high trust signal — exactly the kind of thing reviewers and HN commenters notice.
+
+### Linux port
+
+X11 + Wayland clipboard injection paths, AppImage / deb / Flatpak packaging. rdev's Wayland coverage is the gating dependency. sherpa-onnx works the same on Linux as macOS / Windows.
 
 ### Cross-platform status (post Wave 3 polish)
 

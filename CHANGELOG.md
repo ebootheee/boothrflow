@@ -4,6 +4,13 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-02 (planning)
+
+### Added
+
+- **Wave 6 plan committed** — [`docs/waves/wave-6-production-polish.md`](./docs/waves/wave-6-production-polish.md). Six phases (release infrastructure → macOS signing → Windows signing → auto-update → onboarding wizard → beta/stable channels), 6-9 days total. Each phase independently shippable. After Wave 6 the project moves to a staging → stable release cadence.
+- **Future-ideas section in ROADMAP.md** — Obsidian + custom connectors (push dictations / embeddings to a vault, voice-trigger routing, history-row push action), hyper-modern UI rebuild (Settings + pill redesign, Liquid Glass / Vibrancy on macOS, command palette, keyboard shortcuts), meeting transcription mode, plugin API, insights dashboard, snippets, voice commands, privacy audit doc, Linux port. Captured so they don't get lost; not committed.
+
 ## 2026-05-02
 
 ### Added
