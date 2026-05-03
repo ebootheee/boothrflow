@@ -154,6 +154,38 @@ Ship `PRIVACY_AUDIT.md` containing the exact prompt to feed an AI assistant to v
 
 X11 + Wayland clipboard injection paths, AppImage / deb / Flatpak packaging. rdev's Wayland coverage is the gating dependency. sherpa-onnx works the same on Linux as macOS / Windows.
 
+### Mobile companion (iOS, capture-and-sync — Path B)
+
+Not a Wispr-on-iOS clone. iOS doesn't allow the "push-to-talk → paste anywhere" magic that desktop boothrflow does (no global hotkeys, no paste-into-any-app, sandboxed app-context). Trying to compete with Wispr's iOS app or AudioPen on their turf is a losing fight against incumbent marketing budgets.
+
+Instead: a **private mobile capture surface** for the same searchable corpus your desktop boothrflow owns. Phone is always with you; desktop is where you process + paste. Two paths into the same house.
+
+**Architecture sketch:**
+
+- **iOS app** (Tauri 2 mobile, sharing the Settings + history UI from desktop). Dictate via hold-to-record button; on-device STT (WhisperKit on the Apple Neural Engine, or sherpa-onnx → Parakeet via ONNX Runtime's CoreML provider); on-device cleanup via Apple Intelligence's `FoundationModels` framework on iOS 18+ (free, no API key) or MLX-hosted Qwen 1.5B Q4 (fits in iPhone 15 Pro+ memory budget). Optional BYOK cloud LLM cleanup for users who prefer cloud quality.
+- **Sync layer** between phone + desktop, **end-to-end encrypted with user-hosted keys** (Signal-style trust model — server can store ciphertext but can't read it; key derivation lives on the user's devices, not on a central service). Three viable transports:
+  - **iCloud Drive** as the dumb blob store — phone writes ciphertext, desktop reads it. Zero infra to run.
+  - **LAN-only sync** when both devices are on the same WiFi (mDNS discovery + libp2p). Most private, no third-party at all.
+  - **Self-hosted relay** (the user runs a Cloudflare Tunnel / Tailscale / etc.) for "public WiFi at a coffee shop" cases. Optional.
+- **No central server boothrflow runs.** Same posture as Obsidian's Sync vs Sync Server — we don't see your data even if we wanted to.
+
+**Two flavors of the mobile app:**
+
+1. **Standard tier** — on-device STT, Apple Intelligence cleanup, sync-to-desktop via iCloud Drive E2E. Fits the existing privacy promise.
+2. **Hardcore privacy tier** — same but: no iCloud, LAN-only sync, MLX-hosted Qwen instead of Apple Intelligence (Apple Intelligence has been audited as on-device but the trust model is "Apple says so" — Qwen via MLX is "you can read the model weights"), Whisper or Parakeet only (no fallback to Apple's SFSpeechRecognizer which routes through Apple servers on older devices). Toggleable in Settings.
+
+**Differentiator:**
+
+Nobody in the dictation space ships E2E-encrypted sync with user-hosted keys. AudioPen / Wispr / Cleft all hold your transcripts on their servers in plaintext. Even the "private" iOS dictation tools are private-from-other-users, not private-from-the-vendor. Signal-style trust ("we literally cannot read your data") is novel for this category.
+
+**Pairs naturally with:**
+
+- **Obsidian connector** (Future ideas above) — phone dictation → encrypted sync → desktop history → Obsidian vault. One unified note corpus.
+- **Meeting transcription mode** (Future ideas above) — phone records the meeting, desktop processes + indexes it.
+- **Privacy audit doc** (Future ideas above) — the iOS path needs its own audit chapter; the LAN-only / no-cloud variant is genuinely auditable.
+
+**Realistic scope:** ~6-8 weeks of focused work for the standard tier; +2-3 weeks for the hardcore-privacy tier. App Store review, Apple Developer enrollment cost overlap with Wave 6's macOS code-signing work. Not a near-term wave — sit in Future Ideas until desktop is shipped + the connector story is proven.
+
 ### Cross-platform status (post Wave 3 polish)
 
 Wave 3 polish lands across platforms as follows:
@@ -304,10 +336,10 @@ Goal: continuous-recording meetings produce transcript + summary as markdown aut
 
 ## What we are deliberately not building
 
-- Mobile (Wispr Flow's edge; we're desktop-first).
-- Cloud sync of dictionary/snippets across devices (local-first means the data stays here).
-- Team features.
-- Voice-control automation (Talon's territory; different problem).
+- **Wispr-clone on iOS.** A push-to-talk-anywhere iOS app (their model — keyboard extension, paste-into-any-app) competes with Wispr + AudioPen on their turf. We're not chasing that fight. _The mobile companion sketch in Future Ideas (capture-and-sync with E2E + on-device local) is a different product — it doubles down on privacy + memory rather than copy Wispr._
+- **Vendor-controlled cloud sync.** Any sync we ship is end-to-end encrypted with user-hosted keys (Signal-style); we never see plaintext, even if we run a relay. If we can't make E2E work, we don't ship sync.
+- **Team features.** Multi-user shared corpora, collaborative dictation, etc. Single-user product.
+- **Voice-control automation.** Talon's territory; different problem.
 
 ## How feature decisions get made
 

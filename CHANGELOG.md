@@ -8,8 +8,14 @@ detail and rationale lives in commits + the per-wave docs under
 
 ### Added
 
-- **Wave 6 plan committed** — [`docs/waves/wave-6-production-polish.md`](./docs/waves/wave-6-production-polish.md). Six phases (release infrastructure → macOS signing → Windows signing → auto-update → onboarding wizard → beta/stable channels), 6-9 days total. Each phase independently shippable. After Wave 6 the project moves to a staging → stable release cadence.
+- **Wave 6 plan committed** — [`docs/waves/wave-6-production-polish.md`](./docs/waves/wave-6-production-polish.md). Six phases (release infrastructure → macOS signing → auto-update → Windows signing → onboarding wizard → beta/stable channels), 6-9 days total. Each phase independently shippable. After Wave 6 the project moves to a staging → stable release cadence.
 - **Future-ideas section in ROADMAP.md** — Obsidian + custom connectors (push dictations / embeddings to a vault, voice-trigger routing, history-row push action), hyper-modern UI rebuild (Settings + pill redesign, Liquid Glass / Vibrancy on macOS, command palette, keyboard shortcuts), meeting transcription mode, plugin API, insights dashboard, snippets, voice commands, privacy audit doc, Linux port. Captured so they don't get lost; not committed.
+- **iOS mobile companion** added to Future Ideas. Not a Wispr-clone — a private capture-and-sync surface for the same searchable corpus the desktop owns. On-device STT (WhisperKit / sherpa-onnx via CoreML) + on-device cleanup (Apple Intelligence FoundationModels or MLX-hosted Qwen 1.5B Q4) + end-to-end encrypted sync with user-hosted keys (Signal-style trust model). Two flavors: standard tier (iCloud-Drive E2E sync), hardcore-privacy tier (LAN-only sync + MLX cleanup + Whisper/Parakeet only). Pairs natively with the Obsidian connector idea.
+
+### Changed
+
+- **Wave 6 plan: auto-update pulled into the early-Wave-6 bundle** (Phase 3 instead of Phase 4). Unsigned auto-update is broken UX — every update re-triggers Gatekeeper's "Open Anyway" dance. Pairing auto-update directly with macOS signing means the first three phases together ship a working release loop on Eric's daily driver. Windows signing slips to Phase 4 — can lag a release.
+- **"Deliberately not building" list refined** — removed the blanket "Mobile" exclusion in favor of "Wispr-clone on iOS" specifically (the mobile companion is a different product). Added "Vendor-controlled cloud sync" — any sync we ship is E2E with user-hosted keys, or we don't ship sync.
 
 ## 2026-05-02
 
