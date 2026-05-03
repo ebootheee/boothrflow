@@ -50,8 +50,8 @@ UAT checklist: [`docs/uat/wave-5-checklist.md`](./docs/uat/wave-5-checklist.md).
 
 1. **Release infrastructure** — `VERSION` file, GitHub Actions matrix build (macOS-arm64, macOS-x64, Windows-x64), `RELEASING.md` playbook, CHANGELOG → release-notes mapping.
 2. **macOS code signing + notarization** — Developer ID + `notarytool`. Replaces the dev-mode TCC dance with proper app attribution.
-3. **Windows code signing** — Azure Trusted Signing (cheap path) or EV cert. Quiets SmartScreen for the `.msi`.
-4. **Auto-update** — `tauri-plugin-updater` + GitHub Releases as the manifest server. Settings → About → "Check for updates" + background check + tray badge on available update.
+3. **Auto-update** — `tauri-plugin-updater` + GitHub Releases as the manifest server. Paired with Phase 2 because **unsigned auto-update is broken UX** — every update re-triggers Gatekeeper's "Open Anyway" dance. Sign first, auto-update second; the loop is real after Phase 3 lands. Phases 1+2+3 together = working release loop on macOS.
+4. **Windows code signing** — Azure Trusted Signing (cheap path) or EV cert. Quiets SmartScreen for the `.msi`. Can lag by a release if onboarding drags.
 5. **Onboarding wizard** — first-launch flow walking through privacy callout, mic permission, accessibility/input-monitoring/screen-recording permissions, model download (with progress), hotkey config, LLM endpoint check.
 6. **Beta → Stable channels** — two release manifests (`latest-beta.json` / `latest.json`); promotion script; cadence rules in `RELEASING.md`.
 
