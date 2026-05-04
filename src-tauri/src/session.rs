@@ -77,6 +77,15 @@ mod real {
                 Self::Parakeet(_) => None,
             }
         }
+
+        /// Engine identifier for diagnostics + the captures sidecar.
+        fn name(&self) -> &str {
+            match self {
+                Self::Whisper(e) => e.name(),
+                #[cfg(feature = "parakeet-engine")]
+                Self::Parakeet(e) => e.name(),
+            }
+        }
     }
 
     #[derive(Debug, Clone, Serialize)]
@@ -554,6 +563,40 @@ mod real {
                     llm_ms,
                 },
             );
+        }
+
+        // Optional benchmark capture — gated on `BOOTHRFLOW_SAVE_CAPTURES`
+        // env var. Saves the audio buffer + a JSON sidecar with the raw
+        // transcript, cleaned text, and timing breakdown to the user data
+        // dir's `captures/` directory. See `captures.rs` for the layout.
+        // Skipped under privacy mode for the same reason cleanup is skipped.
+        if crate::captures::enabled() && !settings::privacy_mode_enabled() {
+            let captured_at = chrono::Utc::now().to_rfc3339();
+            let audio_seconds = pcm.len() as f32 / 16_000.0;
+            let style_label = format!("{style:?}").to_lowercase();
+            let app_exe_ref = app_context.as_ref().map(|c| c.app_exe.as_str());
+            let window_title_ref = app_context
+                .as_ref()
+                .and_then(|c| c.window_title.as_deref());
+            let meta = crate::captures::CaptureMetadata {
+                captured_at,
+                engine: engine.name(),
+                style: &style_label,
+                app_exe: app_exe_ref,
+                window_title: window_title_ref,
+                audio_samples: pcm.len(),
+                audio_seconds,
+                raw: &stt_result.text,
+                formatted: &formatted,
+                ground_truth: "",
+                stt_ms,
+                llm_ms,
+                llm_prompt_tokens: cleanup.prompt_tokens,
+                llm_completion_tokens: cleanup.completion_tokens,
+            };
+            if let Err(e) = crate::captures::save(pcm, meta) {
+                tracing::warn!("captures: save failed (continuing): {e}");
+            }
         }
 
         emit_stage(app, "pasting", dictation_started);

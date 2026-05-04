@@ -15,6 +15,8 @@
 //! (no whisper.cpp / llama.cpp compile).
 
 pub mod audio;
+#[cfg(feature = "real-engines")]
+pub mod captures;
 pub mod commands;
 pub mod context;
 pub mod error;
