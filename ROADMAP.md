@@ -59,22 +59,19 @@ UAT checklist: [`docs/uat/wave-5-checklist.md`](./docs/uat/wave-5-checklist.md).
 
 ---
 
-## After Wave 6 — Wave 7 candidates (queued)
+## Wave 7 — Streaming STT + native runtime (active: `feat/wave-7-streaming-stt`)
 
-Pick one (or stack low-cost ones). All deferred during Wave 6 production polish.
+Plan: [`docs/waves/wave-7-streaming-stt.md`](docs/waves/wave-7-streaming-stt.md). Two parallel tracks both targeting the gaps Wave 5's offline Parakeet exposed (no live preview, structural ~13.5s cold-start cost on the Lysara capture):
 
-### Performance baseline + benchmark harness `[low]` (recommended first pick)
+- **Phase 1 — Nemotron Speech Streaming via sherpa-onnx** (3-5d). NVIDIA already ships ONNX exports for cache-aware streaming at 80-1120ms chunks. Same param scale as our current 0.6B Parakeet, so the quality should hold while gaining live preview.
+- **Phase 2 — parakeet.cpp evaluation** (2-3d). C++ Parakeet impl with Metal acceleration via Axiom. Bench against sherpa-onnx Parakeet on the same wavs; swap to it for macOS production builds only if it wins on the load+decode time we measured.
+- **Phase 3 — Bench harness hardening** (1d). Warmup pass + N=3 median. Cold-start ordering bias caused tiny.en to look 9× slower than base.en in Wave 5 first-run numbers; fix that so Phase 1 + 2 numbers are trustworthy.
 
-Before chasing any new STT engine (Parakeet v3, Nemotron Speech Streaming, Multitalker Parakeet — see Future Ideas) we need real numbers on the current stack. Right now we have anecdotes ("Parakeet feels more accurate on jargon," "Whisper streaming is nice"). Anecdotes don't tell us whether a swap is worth shipping.
+After both phases land, the default STT for production is re-decided based on the leaderboard mean grade across ≥ 3 captures.
 
-**Deliverables:**
+### Already-shipped Wave 7 prerequisites (Wave 5)
 
-- Vendored test-wav set in `testdata/benchmark/`: ~10-20 short clips covering casual speech, technical jargon (model names, file paths, code), proper nouns, fast speech, slow speech, ambient noise. Use LibriSpeech-style ground truth for WER computation; Eric can record a few personal-speech clips for the casual/jargon mix.
-- `cargo run --example bench` binary that loops the test set through each (engine × LLM-config × style) combination and emits a CSV: `engine, model, llm, style, audio_seconds, stt_ms, llm_ms, paste_ms, wer_pct, output`.
-- Markdown report generator that turns the CSV into a comparison table with deltas vs the previous run.
-- `docs/benchmarks/baseline-YYYY-MM-DD.md` per run, committed for trend tracking.
-
-Without this, "is engine X actually better?" stays a vibes call.
+- ✅ **Performance baseline harness** — `BOOTHRFLOW_DEV=1` flag, captures-to-disk, `bench:replay` tool, in-app grading UI. Validated on the 116s Lysara capture: Parakeet beat Whisper-tiny + Whisper-base on raw fidelity (named entity, no semantic substitutions), at ~16× the STT load+decode cost.
 
 ### Auto-format style `[medium]`
 

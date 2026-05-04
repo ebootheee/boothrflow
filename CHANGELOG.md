@@ -4,6 +4,26 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-04 (Wave 5 → main, Wave 7 plan)
+
+### Added
+
+- **Wave 5 merged to main** (`feat/wave-5` → `main` via `--no-ff`, commit `763d370`). 20 commits covering context-aware cleanup, Parakeet TDT 0.6B v2 engine, post-paste learning coordinator, macOS Vision OCR, focused-AX read, captures-to-disk, bench replay tool, in-app grading UI.
+- **Developer mode flag (`BOOTHRFLOW_DEV=1`)** replaces `BOOTHRFLOW_SAVE_CAPTURES`. Single umbrella that gates capture saving + Benchmarks tab visibility + future dev-only surfaces. Production builds default the tab off; devs flip the env var to unlock.
+- **Multi-LLM bench fan-out.** `bench:replay` now iterates across qwen2.5:7b + qwen2.5:1.5b (configurable list) instead of just the user's currently-configured model. Raw style emits one variant per STT (no LLM dependency) instead of one per (STT × LLM).
+- **Wave 7 plan committed** — [`docs/waves/wave-7-streaming-stt.md`](./docs/waves/wave-7-streaming-stt.md). Two parallel tracks targeting the streaming + cold-start gaps offline Parakeet exposed: Phase 1 Nemotron Speech Streaming via sherpa-onnx (3-5d), Phase 2 parakeet.cpp evaluation on Apple Silicon (2-3d), Phase 3 bench harness hardening — warmup pass + N=3 median (1d). Default STT for production gets re-decided from leaderboard grades after both phases land.
+
+### Changed
+
+- **Defaults: Parakeet TDT 0.6B v2 + qwen2.5:7b for production builds.** Inner-loop dev (no `parakeet-engine` feature) still defaults to whisper tiny.en so the dev loop stays light. Driven by Wave 5 bench results: on a 116s Lysara dictation, Parakeet was the only engine that got the named entity right and avoided "paste" → "pay" semantic substitution.
+
+### First-run benchmark findings (Lysara capture, 116s)
+
+- whisper:tiny.en → "LISAR", "pay" (semantically wrong); STT 770ms (post-warmup); LLM 7b 8.8s, 1.5b 3.1s.
+- whisper:base.en → "Lysara" ✓, "pay" (still wrong); STT 851ms; LLM 7b 4.0s, 1.5b 1.5s.
+- parakeet:0.6b-v2-int8 → all entities + verbs correct; STT 13.5s (load + decode, consistent across runs); LLM 7b 4.2s, 1.5b 1.4s.
+- qwen2.5:1.5b is ~3× faster than 7b across every variant but **dropped trailing content** on the parakeet+1.5b cleanup (cut last sentence + middle phrase). Suggests a "1.5b for short utterances, 7b for long" heuristic for a future setting.
+
 ## 2026-05-03 (planning)
 
 ### Added
