@@ -1,38 +1,134 @@
-# Wave 7 — Streaming STT + Native Runtime
+# Wave 6 — Engine + formatting
 
-**Goal:** keep Parakeet's transcription quality (which we just confirmed
-beats Whisper-tiny + Whisper-base on the Lysara capture in Wave 5
-benchmarking) while closing two gaps the offline 0.6B-v2 ONNX bundle
-opened up:
+**Goal:** dial in the engine _and_ the cleanup pass before we touch
+production packaging. Two parallel tracks:
 
-1. **No live preview while talking.** Users type-pause-watch on
-   Whisper; with Parakeet the pill stays empty until release. UX
-   regression we papered over by emitting a synthesized partial on
-   `dictation:result`, but that's a fake — there's no real
-   incremental output to stream.
-2. **Cold-start latency is structural.** Sherpa-onnx + 3 ONNX files
-   loaded on every dictation → ~13.5s for a 116s capture in our
-   bench, and that number was _consistent across runs_, so it's not
-   a warm-up artifact. The ONNX runtime overhead is real.
+1. **Replace the tone-based style system** (casual / formal /
+   very-casual / excited) with a single **structuring-aggressiveness
+   axis** (raw / light / moderate / assertive). Tone variation
+   turned out to be noise — what users actually vary is "leave my
+   words alone" vs "organize them for me." Day-one work; testable
+   immediately.
+2. **Close the two gaps offline Parakeet exposed** in Wave 5
+   benchmarking:
+   - **No live preview while talking.** Users type-pause-watch on
+     Whisper; with Parakeet the pill stays empty until release. UX
+     regression we papered over by emitting a synthesized partial on
+     `dictation:result`, but that's a fake — there's no real
+     incremental output to stream.
+   - **Cold-start latency is structural.** Sherpa-onnx + 3 ONNX files
+     loaded on every dictation → ~13.5s for a 116s capture in our
+     bench, and that number was _consistent across runs_, so it's not
+     a warm-up artifact. The ONNX runtime overhead is real.
 
-Two parallel tracks address each. Both can ship independently; we'll
-pick one as default after benchmarking against the existing captures
-under the new dev-mode flow.
+After this wave we have **Parakeet-quality transcription, Whisper-style
+streaming, structure-aware cleanup, all on local inference**. Then
+Wave 7 packages it into something the world can install.
 
 ---
 
 ## Why this matters
 
-Wave 5 made Parakeet usable but exposed two reasons we can't ship it
-as the _only_ engine without losing the live-preview UX users got
-from Whisper. After this wave we have a path to **Parakeet quality +
-Whisper-style streaming + faster than either**, all on local
-inference, no cloud round-trip.
+Wave 5 made Parakeet usable but the engine experience still has two
+soft spots: no live preview and a tone-based style system that
+nobody actually uses the way it's intended. The instinct from Wispr's
+"auto-format" feature is right — long brain dumps want structure,
+short utterances want to be left alone. That's a single knob, not a
+tone wheel.
 
 Plus: the `BOOTHRFLOW_DEV=1` flag landed in Wave 5 makes the bench
 harness a permanent part of how we evaluate engine swaps. Every
 candidate goes through the same `bench:replay` + grading UI on the
 same captured wavs. No more "trust me bro, X is faster."
+
+We finish all this _before_ Wave 7's signing + auto-update because
+shipping a polished installer of an unpolished engine is the wrong
+order. Better to have one user (Eric) on a fast iteration loop with
+the engine we actually want to ship long-term than ten users on a
+signed installer of a placeholder.
+
+---
+
+## Phase 0 — Style overhaul: structure-aggressiveness axis (1–2 days)
+
+The current `Style` enum (`Casual`, `Formal`, `VeryCasual`, `Excited`,
+`Raw`, `CaptainsLog`) mixes two axes:
+
+- **Tone** (casual ↔ formal ↔ excited)
+- **Structure** (raw ↔ cleaned-up)
+
+Empirically, users don't switch tones — they pick one once and forget
+the picker exists. What they _would_ switch is "this short Slack
+message just needs grammar fixes" vs "this 5-minute brain dump should
+come back as a bulleted memo." That's the single axis worth exposing.
+
+### New style set
+
+| Style         | What it does                                                                                                                                                                                                                                  | Use case                                      |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| **Raw**       | No cleanup, paste verbatim                                                                                                                                                                                                                    | Code dictation, exact-quote capture           |
+| **Light**     | Grammar + light punctuation, paragraph kept as-is. Roughly what current `Casual` does.                                                                                                                                                        | Short utterances, Slack messages, quick notes |
+| **Moderate**  | Light cleanup _plus_ paragraph splits at natural breaks, removes filler ("um," "you know," repeated false starts)                                                                                                                             | Medium-length thoughts, emails                |
+| **Assertive** | LLM has full freedom: bullets when listing, paragraph breaks at sentence-boundary pauses, code fences for "in code" cues, greeting + signature for Mail context, `H1/H2` headers for explicit transitions ("first," "second," "next section") | Long brain dumps, board memos, meeting notes  |
+
+`Captain's Log` stays as an orthogonal **fun preset** — it's a tone
+gimmick that doesn't fit the structure axis. Surfaces under
+"Presets" or similar in Settings, separate from the structure picker.
+
+### Deliverables
+
+- **`Style` enum rewrite** in `src-tauri/src/settings.rs` — replace
+  current variants with `Raw`, `Light`, `Moderate`, `Assertive`,
+  plus `CaptainsLog` retained as-is.
+- **Cleanup prompt branches** in `src-tauri/src/llm/prompt.rs` —
+  one prompt per structure level. The `Assertive` prompt is the new
+  work; it gets the kind of permissions Wispr's auto-format does:
+  _"Reorganize freely. Use bullets when the user lists items. Add
+  paragraph breaks at natural sentence-boundary pauses. Use code
+  fences if the user said 'in code' or the focused app is a code
+  editor. Add a greeting + sign-off when the focused app is Mail.
+  Preserve every fact; never invent. Strip filler words."_
+- **Settings UI** (`src/App.svelte`):
+  - Replace the 6-option select with a 4-option segmented control
+    (Raw / Light / Moderate / Assertive) — visual reinforcement of
+    the "level" mental model.
+  - Help text under the picker explains what each level does, with
+    an example sentence (or short paragraph) showing the difference.
+  - Captain's Log moves to a "Fun presets" disclosure below.
+- **Settings migration** — `migrate()` in `settings.rs` rewrites old
+  values to new:
+  - `Casual`, `VeryCasual`, `Excited` → `Light`
+  - `Formal` → `Moderate`
+  - `Raw` → `Raw`
+  - `CaptainsLog` → `CaptainsLog`
+  - Per-app overrides get the same treatment.
+- **Per-app default suggestions**: when the focused-app context
+  detects Slack/Discord, default to `Light`; when it detects
+  Mail/Notion/Obsidian, default to `Moderate` (or `Assertive` if the
+  utterance is > N seconds — see acceptance below).
+
+### Open questions
+
+- **Should `Assertive` trigger automatically for long utterances?**
+  Empirically, users don't change the picker mid-flow. A "use
+  Assertive when audio_seconds > 60s" auto-promote (revertable in
+  Settings) might match user intent better than forcing them to
+  pre-select. Decide after Phase 0 ships and we have grading data.
+- **Streaming compatibility.** Whisper's LA2 streaming finalizes
+  partials as the user speaks. The cleanup pass runs once at the end.
+  Assertive is post-cleanup so no streaming impact, but
+  documentation should be clear: live-preview shows raw transcript;
+  cleanup style only affects the final pasted text.
+
+### Acceptance
+
+- Existing settings migrate cleanly (no broken installs).
+- The Lysara capture, re-run through `Assertive`, comes back with
+  paragraph breaks, the "what needs to happen between now and then"
+  question split out, and structural markers ("First, ..." /
+  "Second, ...") if the LLM finds them.
+- `Light` graded ≥ current `Casual`'s grade on the same capture
+  (i.e., the rename doesn't regress quality).
 
 ---
 

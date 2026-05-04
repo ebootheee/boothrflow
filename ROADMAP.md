@@ -40,9 +40,28 @@ UAT checklist: [`docs/uat/wave-5-checklist.md`](./docs/uat/wave-5-checklist.md).
 
 ---
 
-## Wave 6 — Production polish (next, locked in)
+## Wave 6 — Engine + formatting (active: `feat/wave-6-engine-and-formatting`)
 
-**Plan:** [`docs/waves/wave-6-production-polish.md`](./docs/waves/wave-6-production-polish.md). Six phases, 6-9 focused days total, each independently shippable.
+**Plan:** [`docs/waves/wave-6-engine-and-formatting.md`](./docs/waves/wave-6-engine-and-formatting.md). Get the engine and the cleanup pass right _before_ we package + ship. Better one user (Eric) on a fast iteration loop with the right engine than ten users on a signed installer of a placeholder.
+
+**Phases:**
+
+0. **Style overhaul** (1-2d, day-one) — replace the tone-based system (casual / formal / very-casual / excited) with a single **structuring-aggressiveness axis** (raw / light / moderate / assertive). Tone variation turned out to be noise; structure is what users actually want to vary. `Assertive` adopts Wispr's auto-format playbook (bullets when listing, paragraph breaks, code fences, greeting + sign-off in Mail context). Captain's Log retained as an orthogonal fun preset.
+1. **Nemotron Speech Streaming via sherpa-onnx** (3-5d) — NVIDIA already ships ONNX exports for cache-aware streaming at 80-1120ms chunks. Same param scale as our current 0.6B Parakeet, so quality should hold while gaining live preview.
+2. **parakeet.cpp evaluation** (2-3d) — C++ Parakeet impl with Metal acceleration via Axiom. Bench against sherpa-onnx Parakeet on the same wavs; swap on macOS only if it wins by >2× on load+decode.
+3. **Bench harness hardening** (1d) — warmup pass + N=3 median. Cold-start ordering bias caused tiny.en to look 9× slower than base.en in Wave 5 first-run numbers; fix it before relying on Phase 1+2 numbers.
+
+After this wave, the default STT + cleanup style for production is re-decided based on leaderboard mean grade across ≥ 3 captures.
+
+### Already-shipped Wave 6 prerequisites (Wave 5)
+
+- ✅ **Performance baseline harness** — `BOOTHRFLOW_DEV=1` flag, captures-to-disk, `bench:replay` tool, in-app grading UI. Validated on the 116s Lysara capture: Parakeet beat Whisper-tiny + Whisper-base on raw fidelity (named entity, no semantic substitutions), at ~16× the STT load+decode cost.
+
+---
+
+## Wave 7 — Production polish (next, locked in)
+
+**Plan:** [`docs/waves/wave-7-production-polish.md`](./docs/waves/wave-7-production-polish.md). Six phases, 6-9 focused days total, each independently shippable. Order swapped with the engine-and-formatting wave: dial in the engine first, _then_ package.
 
 **Goal:** turn boothrflow from "works on Eric's laptop in dev mode" into "anyone can download a signed installer, get prompted by the real app for permissions, and stay current via auto-update." Without this, every dev-mode TCC permission is owned by the parent terminal, the app doesn't appear correctly in System Settings → Privacy & Security panes, and there's no way to give the build to anyone (multi-hour clone-and-compile onboarding).
 
@@ -55,27 +74,23 @@ UAT checklist: [`docs/uat/wave-5-checklist.md`](./docs/uat/wave-5-checklist.md).
 5. **Onboarding wizard** — first-launch flow walking through privacy callout, mic permission, accessibility/input-monitoring/screen-recording permissions, model download (with progress), hotkey config, LLM endpoint check.
 6. **Beta → Stable channels** — two release manifests (`latest-beta.json` / `latest.json`); promotion script; cadence rules in `RELEASING.md`.
 
-**After Wave 6:** every subsequent feature follows a **staging → stable** cadence. Feature branch → local UAT → beta tag → 3-7 day soak on Eric's daily driver → promote to stable. Hot-fix path goes direct to stable.
+**After Wave 7:** every subsequent feature follows a **staging → stable** cadence. Feature branch → local UAT → beta tag → 3-7 day soak on Eric's daily driver → promote to stable. Hot-fix path goes direct to stable.
 
 ---
 
-## Wave 7 — Streaming STT + native runtime (active: `feat/wave-7-streaming-stt`)
+## Wave 8 — Connectors, UI rebuild, privacy audit
 
-Plan: [`docs/waves/wave-7-streaming-stt.md`](docs/waves/wave-7-streaming-stt.md). Two parallel tracks both targeting the gaps Wave 5's offline Parakeet exposed (no live preview, structural ~13.5s cold-start cost on the Lysara capture):
+**Plan:** [`docs/waves/wave-8-connectors-ui-privacy.md`](./docs/waves/wave-8-connectors-ui-privacy.md). The post-production wave — three independent tracks that turn boothrflow from "fast Wispr alternative" into "the local-first dictation tool with reasons-to-switch."
 
-- **Phase 1 — Nemotron Speech Streaming via sherpa-onnx** (3-5d). NVIDIA already ships ONNX exports for cache-aware streaming at 80-1120ms chunks. Same param scale as our current 0.6B Parakeet, so the quality should hold while gaining live preview.
-- **Phase 2 — parakeet.cpp evaluation** (2-3d). C++ Parakeet impl with Metal acceleration via Axiom. Bench against sherpa-onnx Parakeet on the same wavs; swap to it for macOS production builds only if it wins on the load+decode time we measured.
-- **Phase 3 — Bench harness hardening** (1d). Warmup pass + N=3 median. Cold-start ordering bias caused tiny.en to look 9× slower than base.en in Wave 5 first-run numbers; fix that so Phase 1 + 2 numbers are trustworthy.
+**Phases:**
 
-After both phases land, the default STT for production is re-decided based on the leaderboard mean grade across ≥ 3 captures.
+1. **Connectors** (4-6d) — `Connector` trait + Obsidian vault push (markdown notes with frontmatter + embeddings) + custom HTTP webhook + Slack incoming webhooks. Voice-triggered routing detects "push this to Slack" inline and routes via the connector instead of pasting. History rows grow a "Push to…" dropdown.
+2. **Hyper-modern UI rebuild** (5-8d) — visual language refresh (shadcn-svelte or hand-rolled), pill redesign (pulsing dot during listening, typewriter trail during cleanup), Liquid Glass / NSVisualEffectView vibrancy on macOS, Cmd-K command palette, keyboard shortcuts everywhere.
+3. **Privacy audit doc** (1d) — `PRIVACY_AUDIT.md` with a pre-written AI-assistant prompt, default-features checklist, BYOK callouts, telemetry confirmation (none), pass/fail table. Settings → Privacy → "Run privacy audit" button. README badge.
 
-### Already-shipped Wave 7 prerequisites (Wave 5)
+---
 
-- ✅ **Performance baseline harness** — `BOOTHRFLOW_DEV=1` flag, captures-to-disk, `bench:replay` tool, in-app grading UI. Validated on the 116s Lysara capture: Parakeet beat Whisper-tiny + Whisper-base on raw fidelity (named entity, no semantic substitutions), at ~16× the STT load+decode cost.
-
-### Auto-format style `[medium]`
-
-Wispr Flow's killer differentiator. Long dictations come back as actual structure (bullets when you spoke a list, paragraph breaks at sentence-boundary pauses, code fences when you said "in code", greeting + signature in Mail). Surfaces as a sixth Style ("Auto-format") that overrides tone-only styles when app-context confidence is high. Wave 5's app-context detection landed the prerequisite.
+## Smaller items still queued (post-Wave-8 unless promoted)
 
 ### Audio noise suppression `[low–medium]`
 
@@ -94,10 +109,6 @@ RNNoise (Rust binding via `nnnoiseless`, ~85KB model) or DeepFilterNet 3 (upgrad
 - Parakeet streaming partials integration with `LocalAgreement2`.
 - ScreenCaptureKit pivot from the deprecated `CGDisplayCreateImage`.
 
-### Parakeet → default engine `[low]` (gated on benchmark numbers)
-
-Once the performance baseline (above) confirms Parakeet beats Whisper on accuracy + latency on M-series, flip the Rust default in `default_whisper_model()` and bundle Parakeet in the production installer. Whisper stays as the multilingual fallback. Naturally rides on Wave 6 — first stable release that ships with Parakeet built-in.
-
 ### Multilingual Whisper variants `[low]`
 
 Currently we ship the `.en` Whisper variants only (English-only, slightly more accurate on English than the multilingual same-size models). Add the multilingual rows (`tiny`, `base`, `small`, `medium`, `large-v3-turbo` without the `.en` suffix) to the picker so non-English users have an option without switching to BYOK. ~25 lines + a download-script alias each.
@@ -108,44 +119,19 @@ NVIDIA's larger Parakeet variant — same architecture as the 0.6B v2 we ship, ~
 
 ---
 
-## Future ideas (post-Wave-7)
+## Future ideas (post-Wave-8)
 
-Things that have come up and are worth queuing — not committed, just captured so they don't get lost.
+Things that have come up and are worth queuing — not committed, just captured so they don't get lost. (**Connectors**, **hyper-modern UI rebuild**, and **privacy audit doc** were promoted out of this list into Wave 8.)
 
 ### STT engine evaluations (NVIDIA model family)
 
-All gated on the benchmark harness (Wave 7) producing real numbers first — we've been burned enough times by "feels faster" claims that didn't survive measurement. NVIDIA's NeMo team has been shipping ASR models at a fast clip; this is the menu of candidates worth measuring against our current Whisper + Parakeet v2 baseline.
+Mostly absorbed by Wave 6 (which evaluates Nemotron Speech Streaming and parakeet.cpp). Remaining candidates worth queuing — all gated on the Wave 6 bench numbers existing first.
 
 - **Parakeet TDT 0.6B v3 (multilingual).** Same architecture as the v2 we ship, but trained on 25 EU languages with automatic language detection. Direct upgrade once sherpa-onnx publishes its ONNX export. We could re-export from NeMo's checkpoint ourselves with sherpa-onnx's tooling (~1-2 days of model work) instead of waiting. Unblocks multilingual dictation without forcing users to switch to BYOK cloud.
-- **Nemotron Speech Streaming.** Cache-aware streaming ASR with **native punctuation + capitalization** at 80ms-1120ms configurable chunk sizes. Most strategic option of the bunch — if it delivers low-latency streaming AND high accuracy AND already-punctuated output, it could replace Whisper as the streaming engine AND skip the LLM cleanup pass for many cases. Need to verify sherpa-onnx supports it; if not, ONNX Runtime + custom wrapper. Would consolidate the "Whisper streams + LLM punctuates" pipeline into a single model.
 - **Multitalker Parakeet.** Streaming multi-speaker ASR with speaker kernel injection (no enrollment audio required). Natural fit for the meeting transcription mode below — collapses STT + diarization into one model. Better latency and accuracy than the chained pyannote-onnx pipeline that meeting mode currently assumes.
 - **Parakeet Realtime EOU.** 120M-param streaming ASR with built-in end-of-utterance detection at 80-160ms latency. Could replace Silero VAD as our endpoint detector — EOU is a stronger signal than "is the user speaking right now" because it knows when an utterance is _complete_. Tightens tap-to-toggle hands-free mode (auto-stop on real utterance end vs configurable silence timeout).
 - **Canary multilingual translation.** Simultaneous translation + transcription across 25 languages via NVIDIA's Granary dataset. Different feature class — not a replacement for our current STT but the engine behind a "Translate to English" / "Translate to Spanish" Style preset. Speak French, paste English. Niche but cool for multilingual users.
-- **Parakeet 1.1B English** has graduated to the Wave 7 candidate menu above (smaller scope, same architecture as 0.6B).
-
-### Connectors — push dictations / embeddings to other tools
-
-The history store already has FTS5 + nomic-embed-text vectors per dictation. Currently the only consumer is in-app search. Surface that data outward via a connector trait:
-
-- **Obsidian vault push.** Configurable directory; each dictation lands as a markdown note with frontmatter (timestamp, app context, style, tags inferred from the cleanup pass). Embeddings ride along as YAML for later semantic search via Obsidian plugins. The auto-format style (Wave 7) is a natural feeder — bullet lists / paragraphs land cleanly.
-- **Custom HTTP webhook.** POST `{raw, formatted, embedding, timestamp, app_context}` to a user-configured URL. Catch-all for anyone wiring boothrflow into a personal automation pipeline.
-- **Slack / Linear / Notion / Gmail / Google Docs** — same trait, per-service auth + payload shape. v0 set is just Slack incoming webhooks + generic HTTP; richer integrations land progressively.
-- **Voice trigger.** Cleanup pass detects routing instructions inline ("push this to Slack", "send to email", "drop into the ops channel") and treats them as a `Connector::SendTo(target, payload)` instead of a paste. The instruction itself is stripped from the body.
-- **History row action.** Each row in the History panel grows a "Push to…" dropdown.
-
-Originally roadmapped under Phase 3 differentiators; promoted to "future idea" because the Obsidian path specifically is high-leverage for Eric's note-taking workflow and worth a focused wave once Wave 6 production polish lands.
-
-### Hyper-modern UI rebuild
-
-Current Settings panel is functional but not what you'd call "sexy." Candidates:
-
-- **Visual language refresh.** Pick a design system (e.g. shadcn/ui port to Svelte 5, or a custom system). Probably leans into the local-first aesthetic — confident typography, low-chrome, motion that feels alive without being annoying.
-- **Pill redesign.** Currently a rectangle with text inside. Could be a single pulsing dot during listening, transcript flowing out as a typewriter trail during cleaning, etc. The pill is the most-visible surface — worth investing in.
-- **Settings → polished onboarding.** After Wave 6 ships the wizard, the Settings UI itself can feel like a continuation of that polish rather than a separate aesthetic.
-- **Liquid glass / blur effects.** macOS-native vibe (Vibrancy, NSVisualEffectView). Tauri has limited support; might need `objc2-app-kit` calls into the WebKit window's contentView.
-- **Keyboard shortcuts everywhere.** Cmd-, opens Settings. Cmd-K opens command palette. Cmd-/ opens history search. Mode-aware focus states.
-
-Probably best as its own wave (Wave 8?) once the feature surface is stable.
+- **Parakeet 1.1B English.** NVIDIA's larger Parakeet variant — same architecture as the 0.6B v2 we ship, ~2× memory, ~1.5-2× latency, but cleaner output on technical jargon. Worth offering as a third Parakeet row for power users with M-series Pro/Max chips. One-line bundle URL change in the download script + a row in `whisper_models()` once the sherpa-onnx ONNX export is published.
 
 ### Meeting transcription mode
 
@@ -174,10 +160,6 @@ Words/day, accuracy delta over time, top apps used in, rating trend (depends on 
 ### Voice commands in dictation
 
 "press enter", "new line", "delete that", "select all" parsed mid-dictation and translated to keystroke sequences. Different from Command Mode (which is a separate hold-to-speak transformation gesture). Small finite parser.
-
-### Privacy audit doc
-
-Ship `PRIVACY_AUDIT.md` containing the exact prompt to feed an AI assistant to verify all default features are 100% local, plus a checklist with file pointers and pass/fail. Cheap to author, high trust signal — exactly the kind of thing reviewers and HN commenters notice.
 
 ### Linux port
 

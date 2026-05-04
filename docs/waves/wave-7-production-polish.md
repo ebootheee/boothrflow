@@ -1,11 +1,11 @@
-# Wave 6 — Production Polish
+# Wave 7 — Production Polish
 
 **Goal:** turn boothrflow from "works on Eric's laptop in dev mode"
 into "anyone can download a signed installer, get prompted by the
 real app for permissions, and stay current via auto-update." Six
 phases, each independently shippable.
 
-After Wave 6, every subsequent feature follows a **staging → stable**
+After Wave 7, every subsequent feature follows a **staging → stable**
 cadence (a `beta` update channel ships first, then promotes to
 `stable` after soak). The cadence itself is part of this wave —
 without code signing + auto-update, there's no real way to run two
@@ -376,7 +376,7 @@ The phase numbering above already reflects the dependency ordering —
 release infra → macOS signing → macOS auto-update → Windows signing
 → onboarding → channels.
 
-The early Wave 6 deliverable (phases 1+2+3) gives Eric a working
+The early Wave 7 deliverable (phases 1+2+3) gives Eric a working
 release loop on macOS: signed `.dmg`s on GitHub Releases that
 auto-update him on his daily driver. **Auto-update is paired with
 macOS signing because unsigned auto-update is broken UX** — every
@@ -391,9 +391,9 @@ it depends on auto-update being solid.
 
 ---
 
-## After Wave 6 — staging → production cadence
+## After Wave 7 — staging → production cadence
 
-Wave 6 unlocks a real release loop. Every subsequent feature
+Wave 7 unlocks a real release loop. Every subsequent feature
 follows this pattern:
 
 1. **Land on a feature branch** (`feat/wave-N-name`), same as Wave 5.
@@ -424,7 +424,7 @@ follows this pattern:
 - **Azure account** — want to use one already in place at GreenPoint
   or set up a new dedicated one for boothrflow?
 - **Domain for landing page** — `boothrflow.com` or similar? Not
-  required for Wave 6 but tightly related (release-notes link target,
+  required for Wave 7 but tightly related (release-notes link target,
   ProductHunt-eventually anchor).
 - **Beta channel users** — invite-only (handful of friends) or
   public-but-marked-beta? Affects how loud the "this is unstable"

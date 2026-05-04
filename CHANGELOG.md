@@ -4,6 +4,22 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-04 — wave reordering (Wave 6 ↔ 7 swap, Wave 8 added)
+
+### Changed
+
+- **Swapped Wave 6 and Wave 7.** New ordering: **Wave 6 = engine + formatting** (was old Wave 7), **Wave 7 = production polish** (was old Wave 6). Reasoning: dial in the engine and the cleanup pass _before_ packaging it into a signed installer. Better one user (Eric) on a fast iteration loop with the right engine than ten users on a polished installer of a placeholder.
+- **Branch + doc renames** — `feat/wave-7-streaming-stt` → `feat/wave-6-engine-and-formatting`. `docs/waves/wave-7-streaming-stt.md` → `docs/waves/wave-6-engine-and-formatting.md`. `docs/waves/wave-6-production-polish.md` → `docs/waves/wave-7-production-polish.md`.
+
+### Added
+
+- **New Phase 0 in Wave 6: style overhaul.** Replace the tone-based `Style` enum (casual / formal / very-casual / excited / raw / captains-log) with a single **structuring-aggressiveness axis**: raw / light / moderate / assertive. Tone variation turned out to be noise; users actually vary how aggressively the LLM should structure output. `Assertive` adopts Wispr's auto-format playbook (bullets when listing, paragraph breaks at sentence-boundary pauses, code fences for "in code" cues, greeting + sign-off when focused app is Mail). Captain's Log retained as an orthogonal fun preset. Day-one work, testable immediately.
+- **New Wave 8 — Connectors + UI rebuild + privacy audit.** Pulls forward three items from Future Ideas into a dedicated wave: (1) Connector trait + Obsidian vault push + custom HTTP webhook + Slack incoming webhooks + voice-triggered routing + History row push action; (2) hyper-modern UI rebuild (visual language refresh, pill redesign, Liquid Glass / NSVisualEffectView vibrancy on macOS, Cmd-K command palette, keyboard shortcuts); (3) `PRIVACY_AUDIT.md` with pre-written AI-assistant verification prompt + default-features checklist + BYOK callouts + telemetry confirmation + pass/fail table. Plan: [`docs/waves/wave-8-connectors-ui-privacy.md`](./docs/waves/wave-8-connectors-ui-privacy.md).
+
+### Removed
+
+- **From "Future Ideas":** Connectors section, Hyper-modern UI rebuild section, Privacy audit doc section (all promoted to Wave 8). "Parakeet → default engine" candidate (already done — landed as part of the Wave 5 → main merge).
+
 ## 2026-05-04 (Wave 5 → main, Wave 7 plan)
 
 ### Added
