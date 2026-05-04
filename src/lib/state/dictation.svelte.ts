@@ -136,18 +136,43 @@ function createDictationStore() {
     await listen<SttResultPayload>("dictation:result", (e) => {
       state.lastResult = e.payload;
       state.history = [e.payload, ...state.history].slice(0, 20);
+      // Engines without streaming partials (Parakeet today — Whisper does
+      // emit them) skip `dictation:partial` entirely. Without this, the pill
+      // never shows the transcript text — it goes from "listening" → "pasting"
+      // with the partial-row stuck on the helper string. Synthesize a
+      // committed-only partial from the final result so the pill displays
+      // the text during the transcribing → cleaning → pasting tail.
+      if (!state.lastPartial) {
+        state.lastPartial = {
+          committed: e.payload.text,
+          tentative: "",
+          at_ms: 0,
+        };
+      }
     });
 
     await listen<DonePayload>("dictation:done", (e) => {
       state.lastDone = e.payload;
     });
 
-    await listen("dictation:formatted", () => {
-      // The daemon only emits `dictation:formatted` when LLM cleanup actually
-      // produced different text from the raw transcript — strong signal the
-      // cleanup pass ran.
-      state.lastLlmRan = true;
-    });
+    await listen<{ raw: string; formatted: string; style: string; llm_ms: number }>(
+      "dictation:formatted",
+      (e) => {
+        // The daemon only emits `dictation:formatted` when LLM cleanup
+        // actually produced different text from the raw transcript — strong
+        // signal the cleanup pass ran.
+        state.lastLlmRan = true;
+        // Bump the pill display to the cleaned text during the pasting
+        // tail. Same fallback path as the `dictation:result` synth above —
+        // matters most for non-streaming engines (Parakeet) where this is
+        // the user's only chance to see the cleaned output before paste.
+        state.lastPartial = {
+          committed: e.payload.formatted,
+          tentative: "",
+          at_ms: 0,
+        };
+      },
+    );
 
     await listen<string>("dictation:error", (e) => {
       state.lifecycle = "idle";
