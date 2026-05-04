@@ -63,6 +63,19 @@ UAT checklist: [`docs/uat/wave-5-checklist.md`](./docs/uat/wave-5-checklist.md).
 
 Pick one (or stack low-cost ones). All deferred during Wave 6 production polish.
 
+### Performance baseline + benchmark harness `[low]` (recommended first pick)
+
+Before chasing any new STT engine (Parakeet v3, Nemotron Speech Streaming, Multitalker Parakeet — see Future Ideas) we need real numbers on the current stack. Right now we have anecdotes ("Parakeet feels more accurate on jargon," "Whisper streaming is nice"). Anecdotes don't tell us whether a swap is worth shipping.
+
+**Deliverables:**
+
+- Vendored test-wav set in `testdata/benchmark/`: ~10-20 short clips covering casual speech, technical jargon (model names, file paths, code), proper nouns, fast speech, slow speech, ambient noise. Use LibriSpeech-style ground truth for WER computation; Eric can record a few personal-speech clips for the casual/jargon mix.
+- `cargo run --example bench` binary that loops the test set through each (engine × LLM-config × style) combination and emits a CSV: `engine, model, llm, style, audio_seconds, stt_ms, llm_ms, paste_ms, wer_pct, output`.
+- Markdown report generator that turns the CSV into a comparison table with deltas vs the previous run.
+- `docs/benchmarks/baseline-YYYY-MM-DD.md` per run, committed for trend tracking.
+
+Without this, "is engine X actually better?" stays a vibes call.
+
 ### Auto-format style `[medium]`
 
 Wispr Flow's killer differentiator. Long dictations come back as actual structure (bullets when you spoke a list, paragraph breaks at sentence-boundary pauses, code fences when you said "in code", greeting + signature in Mail). Surfaces as a sixth Style ("Auto-format") that overrides tone-only styles when app-context confidence is high. Wave 5's app-context detection landed the prerequisite.
@@ -84,15 +97,34 @@ RNNoise (Rust binding via `nnnoiseless`, ~85KB model) or DeepFilterNet 3 (upgrad
 - Parakeet streaming partials integration with `LocalAgreement2`.
 - ScreenCaptureKit pivot from the deprecated `CGDisplayCreateImage`.
 
-### Parakeet → default engine `[low]`
+### Parakeet → default engine `[low]` (gated on benchmark numbers)
 
-Once Parakeet UAT (Wave 5) confirms parity-or-better cleanup quality at lower latency on M-series, flip the Rust default in `default_whisper_model()` and bundle Parakeet in the production installer. Whisper stays as the multilingual fallback. Naturally rides on Wave 6 — first stable release that ships with Parakeet built-in.
+Once the performance baseline (above) confirms Parakeet beats Whisper on accuracy + latency on M-series, flip the Rust default in `default_whisper_model()` and bundle Parakeet in the production installer. Whisper stays as the multilingual fallback. Naturally rides on Wave 6 — first stable release that ships with Parakeet built-in.
+
+### Multilingual Whisper variants `[low]`
+
+Currently we ship the `.en` Whisper variants only (English-only, slightly more accurate on English than the multilingual same-size models). Add the multilingual rows (`tiny`, `base`, `small`, `medium`, `large-v3-turbo` without the `.en` suffix) to the picker so non-English users have an option without switching to BYOK. ~25 lines + a download-script alias each.
+
+### Parakeet 1.1B English variant `[low]` (gated on benchmark numbers)
+
+NVIDIA's larger Parakeet variant — same architecture as the 0.6B v2 we ship, ~2× memory, ~1.5-2× latency, but cleaner output on technical jargon. Worth offering as a third Parakeet row for power users with M-series Pro/Max chips. One-line bundle URL change in the download script + a row in `whisper_models()` once the sherpa-onnx ONNX export is published.
 
 ---
 
 ## Future ideas (post-Wave-7)
 
 Things that have come up and are worth queuing — not committed, just captured so they don't get lost.
+
+### STT engine evaluations (NVIDIA model family)
+
+All gated on the benchmark harness (Wave 7) producing real numbers first — we've been burned enough times by "feels faster" claims that didn't survive measurement. NVIDIA's NeMo team has been shipping ASR models at a fast clip; this is the menu of candidates worth measuring against our current Whisper + Parakeet v2 baseline.
+
+- **Parakeet TDT 0.6B v3 (multilingual).** Same architecture as the v2 we ship, but trained on 25 EU languages with automatic language detection. Direct upgrade once sherpa-onnx publishes its ONNX export. We could re-export from NeMo's checkpoint ourselves with sherpa-onnx's tooling (~1-2 days of model work) instead of waiting. Unblocks multilingual dictation without forcing users to switch to BYOK cloud.
+- **Nemotron Speech Streaming.** Cache-aware streaming ASR with **native punctuation + capitalization** at 80ms-1120ms configurable chunk sizes. Most strategic option of the bunch — if it delivers low-latency streaming AND high accuracy AND already-punctuated output, it could replace Whisper as the streaming engine AND skip the LLM cleanup pass for many cases. Need to verify sherpa-onnx supports it; if not, ONNX Runtime + custom wrapper. Would consolidate the "Whisper streams + LLM punctuates" pipeline into a single model.
+- **Multitalker Parakeet.** Streaming multi-speaker ASR with speaker kernel injection (no enrollment audio required). Natural fit for the meeting transcription mode below — collapses STT + diarization into one model. Better latency and accuracy than the chained pyannote-onnx pipeline that meeting mode currently assumes.
+- **Parakeet Realtime EOU.** 120M-param streaming ASR with built-in end-of-utterance detection at 80-160ms latency. Could replace Silero VAD as our endpoint detector — EOU is a stronger signal than "is the user speaking right now" because it knows when an utterance is _complete_. Tightens tap-to-toggle hands-free mode (auto-stop on real utterance end vs configurable silence timeout).
+- **Canary multilingual translation.** Simultaneous translation + transcription across 25 languages via NVIDIA's Granary dataset. Different feature class — not a replacement for our current STT but the engine behind a "Translate to English" / "Translate to Spanish" Style preset. Speak French, paste English. Niche but cool for multilingual users.
+- **Parakeet 1.1B English** has graduated to the Wave 7 candidate menu above (smaller scope, same architecture as 0.6B).
 
 ### Connectors — push dictations / embeddings to other tools
 

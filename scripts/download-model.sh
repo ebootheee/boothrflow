@@ -14,8 +14,11 @@ set -euo pipefail
 #
 # After downloading parakeet, rebuild with:
 #   cargo build --features "real-engines parakeet-engine"
-# and select "NVIDIA Parakeet TDT 0.6B v3 (preview)" in Settings →
-# Voice → Whisper model.
+# and select "NVIDIA Parakeet TDT 0.6B (preview)" in Settings →
+# Voice → Recognition. Note: the bundle is sherpa-onnx's v2 ONNX
+# export of NeMo Parakeet TDT 0.6B (English only). The "v3"
+# multilingual variant is queued as a Future Idea once sherpa-onnx
+# ships its ONNX export of v3 — see ROADMAP.md.
 
 arg="${1:-tiny}"
 
@@ -102,7 +105,11 @@ if [[ "${arg}" == "parakeet" ]]; then
   echo "  1. Run with the parakeet-engine feature:"
   echo "       pnpm dev:parakeet"
   echo "  2. In Settings → Voice → Recognition, pick"
-  echo "     'NVIDIA Parakeet TDT 0.6B v3 (preview)'."
+  echo "     'NVIDIA Parakeet TDT 0.6B — final transcript only (preview)'."
+  echo
+  echo "Note: the bundle is sherpa-onnx's v2 ONNX export of NeMo"
+  echo "Parakeet TDT 0.6B (English only). The v3 multilingual variant"
+  echo "is queued as a future ROADMAP item."
   exit 0
 fi
 

@@ -4,6 +4,24 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-03 (planning)
+
+### Added
+
+- **Performance baseline + benchmark harness** added to Wave 7 candidates as the recommended first pick. Vendored test-wav set, `cargo run --example bench` binary that loops the set through each (engine × LLM-config × style) combo and emits a CSV, markdown report generator, `docs/benchmarks/baseline-YYYY-MM-DD.md` snapshots for trend tracking. Gates every subsequent engine swap — without numbers, "is engine X better?" stays a vibes call.
+- **STT engine evaluations subsection** in Future Ideas. Captures the NVIDIA NeMo model family worth measuring against our baseline once it exists:
+  - Parakeet TDT 0.6B v3 (multilingual; 25 EU languages with auto language detection)
+  - Nemotron Speech Streaming (low-latency streaming with native punctuation — most strategic option, could replace Whisper streaming AND skip the LLM cleanup pass)
+  - Multitalker Parakeet (multi-speaker ASR for meeting mode — collapses STT + diarization)
+  - Parakeet Realtime EOU (120M streaming model with end-of-utterance detection — Silero VAD upgrade for tap-to-toggle)
+  - Canary multilingual translation (powers a "Translate to English / Spanish / etc" Style preset)
+- **Wave 7 candidates: multilingual Whisper variants + Parakeet 1.1B English** added. Both small. Multilingual Whisper unblocks non-English without forcing BYOK; Parakeet 1.1B is a power-user precision option for M-series Pro/Max.
+- **"Parakeet → default engine" candidate gated on benchmark numbers** explicitly. No swap without measurement.
+
+### Changed
+
+- **Honesty pass on Parakeet labeling.** The bundle we ship is the v2 ONNX export of NeMo Parakeet TDT 0.6B (English only) — the directory and settings identifier were aspirationally named `parakeet-tdt-0.6b-v3` but the actual model files inside are v2. User-facing strings (download-script messages, picker label, ROADMAP entries) now say "Parakeet TDT 0.6B (preview)" without claiming v3. Internal identifiers (`parakeet-tdt-0.6b-v3` directory + settings value) preserved so existing installs don't break; v3 multilingual moves to Future Ideas as a follow-up bundle swap.
+
 ## 2026-05-02 (planning)
 
 ### Added
