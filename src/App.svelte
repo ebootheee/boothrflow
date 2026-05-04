@@ -160,7 +160,14 @@
   let historyStats = $state<HistoryStats | null>(null);
   let historyLoading = $state(false);
   let historyError = $state<string | null>(null);
+  // History: which row is currently expanded inline. Click a row to expand
+  // its detail beneath it; click the same row again to collapse; click a
+  // different row to swap. Replaces the old side-by-side detail panel that
+  // could overflow viewport at narrow widths. `selectedHistoryId` keeps
+  // tracking the most-recently-opened row so derived state (sttMs, llmMs,
+  // chips) doesn't lose its anchor when nothing is expanded.
   let selectedHistoryId = $state<number | null>(null);
+  let expandedHistoryId = $state<number | null>(null);
   // macOS permissions flow. The Info.plist usage strings make prod builds
   // prompt at first capture, but in dev (`tauri dev`) the prompt is
   // attributed to the parent terminal and the user has to relaunch it
@@ -526,11 +533,20 @@
   function llmDisplay(): string {
     switch (llmStatus) {
       case "ran": {
-        const tps = dictationStore.lastDone?.llm_tok_per_sec;
+        const done = dictationStore.lastDone;
+        const tps = done?.llm_tok_per_sec;
+        const completion = done?.llm_completion_tokens;
         const base = formatMs(llmMs);
-        // Show tok/s alongside ms when the backend reported it. Distinct
-        // from `null` (Ollama silent) — null is rendered as just the ms.
-        return tps != null && tps > 0 ? `${base} · ${tps.toFixed(0)} tok/s` : base;
+        // Show tok/s when the backend reported it. If only token counts
+        // came back (some compat servers omit elapsed-aware fields),
+        // derive tok/s from completion_tokens + llm_ms as a fallback.
+        // Falls through to "ms only" when neither is available.
+        if (tps != null && tps > 0) return `${base} · ${tps.toFixed(0)} tok/s`;
+        if (completion != null && completion > 0 && llmMs > 0) {
+          const derived = completion / (llmMs / 1000);
+          return `${base} · ${derived.toFixed(0)} tok/s`;
+        }
+        return base;
       }
       case "skipped-raw":
         return "off (raw)";
@@ -1790,92 +1806,91 @@
       </aside>
     </section>
 
-    <section class="history-grid">
-      <section class="panel history-panel" aria-labelledby="history-heading">
-        <div class="panel-head history-head">
-          <div>
-            <span class="section-kicker">History</span>
-            <h2 id="history-heading">Recent transcripts</h2>
-          </div>
-          <button class="quiet-button" type="button" onclick={() => void loadHistory()}>
-            {historyLoading ? "Loading" : "Refresh"}
-          </button>
+    <section class="panel history-panel" aria-labelledby="history-heading">
+      <div class="panel-head history-head">
+        <div>
+          <span class="section-kicker">History</span>
+          <h2 id="history-heading">Recent transcripts</h2>
         </div>
+        <button class="quiet-button" type="button" onclick={() => void loadHistory()}>
+          {historyLoading ? "Loading" : "Refresh"}
+        </button>
+      </div>
 
-        {#if historyError}
-          <div class="inline-error">{historyError}</div>
-        {/if}
+      {#if historyError}
+        <div class="inline-error">{historyError}</div>
+      {/if}
 
-        {#if displayHistory.length}
-          <div class="history-table" role="list" aria-label="Recent transcript history">
-            <div class="history-row table-head" aria-hidden="true">
-              <span>Date</span>
-              <span>Latency</span>
-              <span>Style</span>
-              <span>Transcript</span>
-            </div>
-            {#each displayHistory as entry (entry.id)}
+      {#if displayHistory.length}
+        <div class="history-table" role="list" aria-label="Recent transcript history">
+          <div class="history-row table-head" aria-hidden="true">
+            <span>Date</span>
+            <span>Latency</span>
+            <span>Style</span>
+            <span>Transcript</span>
+            <span class="caret-cell" aria-hidden="true"></span>
+          </div>
+          {#each displayHistory as entry (entry.id)}
+            <div class="history-entry" class:expanded={expandedHistoryId === entry.id}>
               <button
                 class="history-row"
-                class:selected={selectedEntry?.id === entry.id}
+                class:selected={expandedHistoryId === entry.id}
                 type="button"
-                onclick={() => (selectedHistoryId = entry.id)}
+                aria-expanded={expandedHistoryId === entry.id}
+                onclick={() => {
+                  if (expandedHistoryId === entry.id) {
+                    expandedHistoryId = null;
+                  } else {
+                    expandedHistoryId = entry.id;
+                    selectedHistoryId = entry.id;
+                  }
+                }}
               >
                 <span>{formatDate(entry.captured_at)}</span>
                 <span>{formatMs(entry.duration_ms + entry.llm_ms)}</span>
                 <span>{styleLabel(entry.style)}</span>
                 <span>{preview(entry.formatted)}</span>
+                <span class="caret-cell" aria-hidden="true">
+                  {expandedHistoryId === entry.id ? "▾" : "▸"}
+                </span>
               </button>
-            {/each}
-          </div>
-        {:else}
-          <div class="empty-panel">
-            {historyLoading ? "Loading history..." : "No saved transcripts yet."}
-          </div>
-        {/if}
-      </section>
+              {#if expandedHistoryId === entry.id}
+                <div class="history-detail" role="region" aria-label="Transcript detail">
+                  <dl class="detail-meta">
+                    <div>
+                      <dt>App</dt>
+                      <dd>{appLabel(entry)}</dd>
+                    </div>
+                    <div>
+                      <dt>Total</dt>
+                      <dd>{formatMs(entry.duration_ms + entry.llm_ms)}</dd>
+                    </div>
+                    <div>
+                      <dt>STT</dt>
+                      <dd>{formatMs(entry.duration_ms)}</dd>
+                    </div>
+                    <div>
+                      <dt>LLM</dt>
+                      <dd>{formatMs(entry.llm_ms)}</dd>
+                    </div>
+                  </dl>
 
-      <section class="panel detail-panel" aria-labelledby="detail-heading">
-        <div class="panel-head">
-          <div>
-            <span class="section-kicker">Open</span>
-            <h2 id="detail-heading">Transcript detail</h2>
-          </div>
-          {#if selectedEntry}
-            <span class="subtle-text">{formatDate(selectedEntry.captured_at)}</span>
-          {/if}
+                  <article class="detail-transcript">{entry.formatted}</article>
+
+                  <details class="raw-details">
+                    <summary>Raw transcript</summary>
+                    <p>{entry.raw}</p>
+                  </details>
+                </div>
+              {/if}
+            </div>
+          {/each}
         </div>
-
-        {#if selectedEntry}
-          <dl class="detail-meta">
-            <div>
-              <dt>App</dt>
-              <dd>{appLabel(selectedEntry)}</dd>
-            </div>
-            <div>
-              <dt>Total</dt>
-              <dd>{formatMs(selectedEntry.duration_ms + selectedEntry.llm_ms)}</dd>
-            </div>
-            <div>
-              <dt>STT</dt>
-              <dd>{formatMs(selectedEntry.duration_ms)}</dd>
-            </div>
-            <div>
-              <dt>LLM</dt>
-              <dd>{formatMs(selectedEntry.llm_ms)}</dd>
-            </div>
-          </dl>
-
-          <article class="detail-transcript">{selectedEntry.formatted}</article>
-
-          <details class="raw-details">
-            <summary>Raw transcript</summary>
-            <p>{selectedEntry.raw}</p>
-          </details>
-        {:else}
-          <div class="empty-panel">Select a history row to open a transcript.</div>
-        {/if}
-      </section>
+      {:else}
+        <div class="empty-panel">
+          {historyLoading ? "Loading history..." : "No saved transcripts yet."}
+        </div>
+      {/if}
     </section>
   </main>
 {/if}
