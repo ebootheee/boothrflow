@@ -276,8 +276,7 @@ impl SettingsStore {
             vocabulary: self.get_or("vocabulary", fallback.vocabulary)?,
             per_app_styles: self.get_or("per_app_styles", fallback.per_app_styles)?,
             commonly_misheard: self.get_or("commonly_misheard", fallback.commonly_misheard)?,
-            cleanup_window_ocr: self
-                .get_or("cleanup_window_ocr", fallback.cleanup_window_ocr)?,
+            cleanup_window_ocr: self.get_or("cleanup_window_ocr", fallback.cleanup_window_ocr)?,
             auto_learn_corrections: self
                 .get_or("auto_learn_corrections", fallback.auto_learn_corrections)?,
         };
@@ -741,7 +740,10 @@ fn default_store_entries() -> Result<HashMap<String, JsonValue>> {
     entries.insert("hotkeys".into(), json(defaults.hotkeys)?);
     entries.insert("vocabulary".into(), json(defaults.vocabulary)?);
     entries.insert("per_app_styles".into(), json(defaults.per_app_styles)?);
-    entries.insert("commonly_misheard".into(), json(defaults.commonly_misheard)?);
+    entries.insert(
+        "commonly_misheard".into(),
+        json(defaults.commonly_misheard)?,
+    );
     entries.insert(
         "cleanup_window_ocr".into(),
         json(defaults.cleanup_window_ocr)?,

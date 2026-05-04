@@ -103,9 +103,8 @@ impl ParakeetSttEngine {
             ..Default::default()
         };
 
-        let recognizer = TransducerRecognizer::new(config).map_err(|e| {
-            BoothError::internal(format!("parakeet sherpa-onnx init: {e}"))
-        })?;
+        let recognizer = TransducerRecognizer::new(config)
+            .map_err(|e| BoothError::internal(format!("parakeet sherpa-onnx init: {e}")))?;
 
         let name = format!(
             "parakeet:{}",
@@ -140,9 +139,10 @@ impl SttEngine for ParakeetSttEngine {
         // the engine wraps it in a Mutex to satisfy `SttEngine`'s
         // `&self` API. No real contention — the session daemon
         // serializes dictations.
-        let mut recognizer = self.recognizer.lock().map_err(|_| {
-            BoothError::internal("parakeet: recognizer mutex poisoned")
-        })?;
+        let mut recognizer = self
+            .recognizer
+            .lock()
+            .map_err(|_| BoothError::internal("parakeet: recognizer mutex poisoned"))?;
         let text = recognizer.transcribe(PARAKEET_SAMPLE_RATE as u32, audio);
         let duration_ms = started.elapsed().as_millis() as u64;
         Ok(SttResult {
@@ -185,9 +185,7 @@ fn validate_decoder_metadata(decoder_path: &Path) -> Result<()> {
         ))
     })?;
     let needle = b"vocab_size";
-    let found = bytes
-        .windows(needle.len())
-        .any(|window| window == needle);
+    let found = bytes.windows(needle.len()).any(|window| window == needle);
     if !found {
         return Err(BoothError::internal(
             "parakeet: decoder.onnx is missing the `vocab_size` metadata \
@@ -242,8 +240,7 @@ mod tests {
         let path = dir.path().join("decoder.onnx");
         // Synthetic ONNX-shaped bytes without the vocab_size key.
         let mut f = std::fs::File::create(&path).unwrap();
-        f.write_all(b"\x08\x07\x12\x07pytorch\x52\x00")
-            .unwrap();
+        f.write_all(b"\x08\x07\x12\x07pytorch\x52\x00").unwrap();
         match validate_decoder_metadata(&path) {
             Ok(()) => panic!("expected vocab_size guard to fire"),
             Err(e) => {

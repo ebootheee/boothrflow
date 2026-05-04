@@ -252,22 +252,22 @@ mod real {
                     // `as_whisper()` returns `None` when Parakeet is
                     // active, which the loop interprets as
                     // "no partials this dictation".
-                    let streaming = stt
-                        .as_ref()
-                        .and_then(LoadedStt::as_whisper)
-                        .and_then(|engine| {
-                            match StreamingTranscriber::spawn(
-                                engine.shared_context(),
-                                engine.initial_prompt().map(|s| s.to_string()),
-                                dictation_started,
-                            ) {
-                                Ok(s) => Some(s),
-                                Err(e) => {
-                                    tracing::warn!("streaming disabled: {e}");
-                                    None
+                    let streaming =
+                        stt.as_ref()
+                            .and_then(LoadedStt::as_whisper)
+                            .and_then(|engine| {
+                                match StreamingTranscriber::spawn(
+                                    engine.shared_context(),
+                                    engine.initial_prompt().map(|s| s.to_string()),
+                                    dictation_started,
+                                ) {
+                                    Ok(s) => Some(s),
+                                    Err(e) => {
+                                        tracing::warn!("streaming disabled: {e}");
+                                        None
+                                    }
                                 }
-                            }
-                        });
+                            });
 
                     let mut frames: Vec<AudioFrame> = Vec::new();
                     let mut released = false;
@@ -575,9 +575,7 @@ mod real {
             let audio_seconds = pcm.len() as f32 / 16_000.0;
             let style_label = format!("{style:?}").to_lowercase();
             let app_exe_ref = app_context.as_ref().map(|c| c.app_exe.as_str());
-            let window_title_ref = app_context
-                .as_ref()
-                .and_then(|c| c.window_title.as_deref());
+            let window_title_ref = app_context.as_ref().and_then(|c| c.window_title.as_deref());
             let meta = crate::captures::CaptureMetadata {
                 captured_at,
                 engine: engine.name(),
@@ -641,9 +639,7 @@ mod real {
                 formatted: formatted.clone(),
                 style,
                 app_exe: app_context.as_ref().map(|c| c.app_exe.clone()),
-                window_title: app_context
-                    .as_ref()
-                    .and_then(|c| c.window_title.clone()),
+                window_title: app_context.as_ref().and_then(|c| c.window_title.clone()),
                 duration_ms: capture_ms,
                 llm_ms,
             };

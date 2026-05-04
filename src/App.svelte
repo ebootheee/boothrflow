@@ -138,8 +138,51 @@
   // Sidebar nav for the Settings modal. Persists across opens so the user
   // doesn't have to re-find their last section. Casper's PR #2 spec'd
   // these five sections; we map our existing fields onto them.
-  type SettingsSection = "general" | "llm" | "whisper" | "history" | "about";
+  type SettingsSection = "general" | "llm" | "whisper" | "history" | "benchmarks" | "about";
   let activeSettingsSection = $state<SettingsSection>("general");
+
+  // Benchmarks tab state. Captures (`<stem>.wav` + `<stem>.json`) come from
+  // the `BOOTHRFLOW_SAVE_CAPTURES=1` runtime hook in `session::transcribe_and_emit`.
+  // Variants (`<stem>.variants.json`) come from `pnpm bench:replay`. The
+  // grading UI here is the consumer half — list captures, audition the wav,
+  // grade each config 1-5 with optional notes, save back to disk.
+  type BenchCapture = {
+    wav_filename: string;
+    captured_at: string;
+    app_exe: string | null;
+    audio_seconds: number;
+    original_engine: string;
+    raw: string;
+    formatted: string;
+    has_variants: boolean;
+    variant_count: number;
+    graded_count: number;
+  };
+  type BenchVariant = {
+    config_id: string;
+    engine: string;
+    llm_model: string;
+    style: string;
+    raw: string;
+    formatted: string;
+    stt_ms: number;
+    llm_ms: number;
+    grade: number | null;
+    notes: string | null;
+  };
+  type BenchVariantsFile = {
+    wav: string;
+    audio_seconds: number;
+    variants: BenchVariant[];
+  };
+  let benchCaptures = $state<BenchCapture[]>([]);
+  let benchLoading = $state(false);
+  let benchError = $state<string | null>(null);
+  let selectedWav = $state<string | null>(null);
+  let selectedVariants = $state<BenchVariantsFile | null>(null);
+  let selectedWavSrc = $state<string | null>(null);
+  let benchSaving = $state(false);
+  let benchSaveStatus = $state<string | null>(null);
 
   // Wave 4b polish surfaces — autostart toggle, LLM connection probe, and
   // app metadata for the About section. Loaded on Settings open.
@@ -552,6 +595,106 @@
     return `${stats.embedded_entries}/${stats.total_entries}`;
   }
 
+  async function loadBenchCaptures() {
+    if (!inDesktop) {
+      benchCaptures = [];
+      return;
+    }
+    benchLoading = true;
+    benchError = null;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      benchCaptures = await invoke<BenchCapture[]>("bench_list");
+      if (selectedWav && !benchCaptures.some((c) => c.wav_filename === selectedWav)) {
+        selectedWav = null;
+        selectedVariants = null;
+        selectedWavSrc = null;
+      }
+    } catch (error) {
+      benchError = String(error);
+    } finally {
+      benchLoading = false;
+    }
+  }
+
+  async function selectCapture(wav_filename: string) {
+    if (!inDesktop) return;
+    selectedWav = wav_filename;
+    selectedVariants = null;
+    selectedWavSrc = null;
+    benchSaveStatus = null;
+    try {
+      const { invoke, convertFileSrc } = await import("@tauri-apps/api/core");
+      const [variants, absPath] = await Promise.all([
+        invoke<BenchVariantsFile | null>("bench_load", { wavFilename: wav_filename }),
+        invoke<string>("bench_wav_path", { wavFilename: wav_filename }),
+      ]);
+      selectedVariants = variants;
+      selectedWavSrc = convertFileSrc(absPath);
+    } catch (error) {
+      benchError = String(error);
+    }
+  }
+
+  function gradeVariant(idx: number, grade: number) {
+    if (!selectedVariants) return;
+    const next = selectedVariants.variants.slice();
+    const cur = next[idx];
+    if (!cur) return;
+    next[idx] = { ...cur, grade: cur.grade === grade ? null : grade };
+    selectedVariants = { ...selectedVariants, variants: next };
+    benchSaveStatus = null;
+  }
+
+  function noteVariant(idx: number, notes: string) {
+    if (!selectedVariants) return;
+    const next = selectedVariants.variants.slice();
+    const cur = next[idx];
+    if (!cur) return;
+    next[idx] = { ...cur, notes: notes || null };
+    selectedVariants = { ...selectedVariants, variants: next };
+    benchSaveStatus = null;
+  }
+
+  async function saveBenchGrades() {
+    if (!inDesktop || !selectedWav || !selectedVariants) return;
+    benchSaving = true;
+    benchSaveStatus = null;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("bench_save", {
+        wavFilename: selectedWav,
+        variants: selectedVariants,
+      });
+      benchSaveStatus = "Saved";
+      void loadBenchCaptures();
+    } catch (error) {
+      benchSaveStatus = `Error: ${error}`;
+    } finally {
+      benchSaving = false;
+    }
+  }
+
+  // Per-config aggregate (mean grade, count). Recomputed when any capture's
+  // variants get loaded — note: this only reflects the currently *open*
+  // capture's variants, since loading every variants file just to compute a
+  // leaderboard would be wasteful. The capture row's `graded_count` shows
+  // overall progress; this leaderboard is the within-capture comparison.
+  const variantLeaderboard = $derived.by(() => {
+    if (!selectedVariants) return [] as { config_id: string; mean: number; count: number }[];
+    const groups: Record<string, { sum: number; count: number }> = {};
+    for (const v of selectedVariants.variants) {
+      if (v.grade == null) continue;
+      const cur = groups[v.config_id] ?? { sum: 0, count: 0 };
+      cur.sum += v.grade;
+      cur.count += 1;
+      groups[v.config_id] = cur;
+    }
+    return Object.entries(groups)
+      .map(([config_id, { sum, count }]) => ({ config_id, mean: sum / count, count }))
+      .sort((a, b) => b.mean - a.mean);
+  });
+
   onMount(() => {
     void settings.load();
     void dictationStore.attach();
@@ -573,6 +716,15 @@
     void loadHistory().then(() => {
       if (historyEntries[0]) selectedHistoryId = historyEntries[0].id;
     });
+  });
+
+  // Lazily load the captures list the first time the Benchmarks tab is
+  // opened, then refresh on each subsequent open (cheap — just a directory
+  // scan + small JSON reads).
+  $effect(() => {
+    if (settingsOpen && activeSettingsSection === "benchmarks") {
+      void loadBenchCaptures();
+    }
   });
 </script>
 
@@ -721,6 +873,13 @@
                 class:active={activeSettingsSection === "history"}
                 onclick={() => (activeSettingsSection = "history")}
                 ><Icon name="database" size={14} /> History</button
+              >
+              <button
+                type="button"
+                class="settings-nav-item"
+                class:active={activeSettingsSection === "benchmarks"}
+                onclick={() => (activeSettingsSection = "benchmarks")}
+                ><Icon name="bar-chart" size={14} /> Benchmarks</button
               >
               <button
                 type="button"
@@ -1166,6 +1325,189 @@
                         updateEmbed({ api_key: event.currentTarget.value || null })}
                     />
                   </label>
+                </section>
+              {:else if activeSettingsSection === "benchmarks"}
+                <section class="settings-section">
+                  <div class="settings-section-head">
+                    <span class="step-icon"><Icon name="bar-chart" size={14} /></span>
+                    <div>
+                      <span class="section-kicker">Quality</span>
+                      <h3>Benchmark grading</h3>
+                    </div>
+                  </div>
+                  <p class="settings-help">
+                    Captures saved with <code>BOOTHRFLOW_SAVE_CAPTURES=1</code>. Run
+                    <code>pnpm bench:replay</code> to fan each wav out across every available STT/LLM/style
+                    combo, then grade the variants here. 1-5 stars per variant; click a star to set, click
+                    the same star again to clear. Notes are free-form.
+                  </p>
+                  {#if benchError}
+                    <div class="inline-error">{benchError}</div>
+                  {/if}
+
+                  <div class="bench-shell">
+                    <aside class="bench-list" aria-label="Captured wavs">
+                      <div class="bench-list-head">
+                        <strong
+                          >{benchCaptures.length} capture{benchCaptures.length === 1
+                            ? ""
+                            : "s"}</strong
+                        >
+                        <button
+                          type="button"
+                          class="quiet-button"
+                          onclick={() => void loadBenchCaptures()}
+                          disabled={benchLoading}
+                        >
+                          {benchLoading ? "Loading..." : "Refresh"}
+                        </button>
+                      </div>
+                      {#if benchCaptures.length === 0 && !benchLoading}
+                        <div class="bench-empty">
+                          No captures yet. Set
+                          <code>BOOTHRFLOW_SAVE_CAPTURES=1</code> when launching the app and dictate something.
+                        </div>
+                      {/if}
+                      <ul class="bench-row-list">
+                        {#each benchCaptures as cap (cap.wav_filename)}
+                          <li>
+                            <button
+                              type="button"
+                              class="bench-row"
+                              class:selected={selectedWav === cap.wav_filename}
+                              onclick={() => void selectCapture(cap.wav_filename)}
+                            >
+                              <span class="bench-row-top">
+                                <strong>{cap.app_exe ?? "Unknown app"}</strong>
+                                <small>{formatSeconds(cap.audio_seconds)}</small>
+                              </span>
+                              <span class="bench-row-mid">{preview(cap.formatted)}</span>
+                              <span class="bench-row-foot">
+                                <small>{cap.captured_at ? formatDate(cap.captured_at) : ""}</small>
+                                {#if cap.has_variants}
+                                  <small>{cap.graded_count}/{cap.variant_count} graded</small>
+                                {:else}
+                                  <small>no variants</small>
+                                {/if}
+                              </span>
+                            </button>
+                          </li>
+                        {/each}
+                      </ul>
+                    </aside>
+
+                    <div class="bench-detail">
+                      {#if !selectedWav}
+                        <div class="bench-empty">Pick a capture on the left.</div>
+                      {:else if !selectedVariants}
+                        <div class="bench-empty">
+                          No <code>{selectedWav.replace(/\.wav$/, ".variants.json")}</code>
+                          sidecar found. Run <code>pnpm bench:replay</code> first.
+                        </div>
+                        {#if selectedWavSrc}
+                          <audio
+                            class="bench-audio"
+                            controls
+                            src={selectedWavSrc}
+                            preload="metadata"
+                          ></audio>
+                        {/if}
+                      {:else}
+                        {#if selectedWavSrc}
+                          <audio
+                            class="bench-audio"
+                            controls
+                            src={selectedWavSrc}
+                            preload="metadata"
+                          ></audio>
+                        {/if}
+
+                        {#if variantLeaderboard.length > 0}
+                          <div class="bench-leaderboard">
+                            <strong>Leaderboard (this capture)</strong>
+                            <ol>
+                              {#each variantLeaderboard as entry (entry.config_id)}
+                                <li>
+                                  <span class="lb-config">{entry.config_id}</span>
+                                  <span class="lb-mean"
+                                    >{entry.mean.toFixed(1)} <small>★</small></span
+                                  >
+                                  <small class="lb-count">{entry.count}×</small>
+                                </li>
+                              {/each}
+                            </ol>
+                          </div>
+                        {/if}
+
+                        <ul class="variant-list">
+                          {#each selectedVariants.variants as v, i (v.config_id)}
+                            <li class="variant-card">
+                              <header class="variant-card-head">
+                                <strong>{v.config_id}</strong>
+                                <small
+                                  >{v.engine} • {v.llm_model} • {v.style} • STT {formatMs(v.stt_ms)} •
+                                  LLM {formatMs(v.llm_ms)}</small
+                                >
+                              </header>
+                              <div class="variant-text">
+                                <label>
+                                  <span>Raw</span>
+                                  <textarea readonly rows="2" value={v.raw}></textarea>
+                                </label>
+                                <label>
+                                  <span>Formatted</span>
+                                  <textarea readonly rows="3" value={v.formatted}></textarea>
+                                </label>
+                              </div>
+                              <div class="variant-grade">
+                                <span class="variant-grade-label">Grade</span>
+                                <div class="star-row" role="group" aria-label="Grade 1 to 5">
+                                  {#each [1, 2, 3, 4, 5] as n (n)}
+                                    <button
+                                      type="button"
+                                      class="star-btn"
+                                      class:filled={v.grade != null && v.grade >= n}
+                                      aria-label={`${n} star${n === 1 ? "" : "s"}`}
+                                      aria-pressed={v.grade === n}
+                                      onclick={() => gradeVariant(i, n)}
+                                    >
+                                      <Icon name="star" size={16} />
+                                    </button>
+                                  {/each}
+                                  {#if v.grade != null}
+                                    <small class="grade-readout">{v.grade}/5</small>
+                                  {/if}
+                                </div>
+                                <label class="variant-notes">
+                                  <span>Notes</span>
+                                  <input
+                                    type="text"
+                                    value={v.notes ?? ""}
+                                    placeholder="optional"
+                                    oninput={(e) => noteVariant(i, e.currentTarget.value)}
+                                  />
+                                </label>
+                              </div>
+                            </li>
+                          {/each}
+                        </ul>
+
+                        <div class="settings-actions bench-save-row">
+                          <button
+                            type="button"
+                            class="primary-button"
+                            onclick={() => void saveBenchGrades()}
+                            disabled={benchSaving}
+                          >
+                            {benchSaving ? "Saving..." : "Save grades"}
+                          </button>
+                          {#if benchSaveStatus}
+                            <span class="bench-save-status">{benchSaveStatus}</span>
+                          {/if}
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
                 </section>
               {:else if activeSettingsSection === "about"}
                 <section class="settings-section">

@@ -593,3 +593,45 @@ pub async fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), Boot
         .reveal_item_in_dir(&path)
         .map_err(|e| BoothError::internal(format!("reveal {path}: {e}")))
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Benchmark grading (Wave 7 prep)
+//
+// Backed by `bench_replay` example which writes `<stem>.variants.json`
+// per captured wav. These commands are the FE-visible CRUD over those
+// files plus helpers for locating the wav on disk so the audio
+// playback can pull it through Tauri's asset protocol.
+// ────────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+#[specta::specta]
+pub fn bench_list() -> Result<Vec<crate::bench::CaptureRow>, BoothError> {
+    crate::bench::list()
+}
+
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+#[specta::specta]
+pub fn bench_load(wav_filename: String) -> Result<Option<crate::bench::VariantsFile>, BoothError> {
+    crate::bench::load(&wav_filename)
+}
+
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+#[specta::specta]
+pub fn bench_save(
+    wav_filename: String,
+    variants: crate::bench::VariantsFile,
+) -> Result<(), BoothError> {
+    crate::bench::save(&wav_filename, variants)
+}
+
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+#[specta::specta]
+pub fn bench_wav_path(wav_filename: String) -> Result<String, BoothError> {
+    Ok(crate::bench::wav_path(&wav_filename)?
+        .to_string_lossy()
+        .into_owned())
+}

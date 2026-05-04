@@ -39,8 +39,7 @@ fn main() {
     );
     let audio: Vec<f32> = if test_wav.exists() {
         eprintln!("probe: using {}", test_wav.display());
-        let mut reader = hound::WavReader::open(test_wav)
-            .expect("open wav");
+        let mut reader = hound::WavReader::open(test_wav).expect("open wav");
         reader
             .samples::<i16>()
             .map(|s| s.expect("read sample") as f32 / 32768.0)

@@ -16,6 +16,8 @@
 
 pub mod audio;
 #[cfg(feature = "real-engines")]
+pub mod bench;
+#[cfg(feature = "real-engines")]
 pub mod captures;
 pub mod commands;
 pub mod context;
@@ -47,8 +49,9 @@ use tauri_specta::{collect_commands, Builder as SpectaBuilder};
 
 #[cfg(feature = "real-engines")]
 use commands::{
-    history_clear, history_delete, history_paste, history_recent, history_search, history_stats,
-    quickpaste_close, quickpaste_paste,
+    bench_list, bench_load, bench_save, bench_wav_path, history_clear, history_delete,
+    history_paste, history_recent, history_search, history_stats, quickpaste_close,
+    quickpaste_paste,
 };
 #[cfg(feature = "real-engines")]
 use std::sync::Arc;
@@ -85,6 +88,10 @@ pub fn build_specta() -> SpectaBuilder<tauri::Wry> {
         llm_test_connection,
         app_version,
         reveal_path,
+        bench_list,
+        bench_load,
+        bench_save,
+        bench_wav_path,
     ])
 }
 

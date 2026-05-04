@@ -67,8 +67,7 @@ fn capture_main_display_text_inner() -> Result<String> {
 
     // initWithCGImage:options: takes an NSDictionary of options;
     // empty dictionary == default settings.
-    let options: Retained<NSDictionary<NSString, objc2::runtime::AnyObject>> =
-        NSDictionary::new();
+    let options: Retained<NSDictionary<NSString, objc2::runtime::AnyObject>> = NSDictionary::new();
     let handler = unsafe {
         VNImageRequestHandler::initWithCGImage_options(
             VNImageRequestHandler::alloc(),

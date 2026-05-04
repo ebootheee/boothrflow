@@ -176,7 +176,11 @@ fn levenshtein(a: &str, b: &str) -> usize {
     for i in 1..=n {
         curr_row[0] = i;
         for j in 1..=m {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
             curr_row[j] = (curr_row[j - 1] + 1)
                 .min(prev_row[j] + 1)
                 .min(prev_row[j - 1] + cost);
@@ -228,21 +232,15 @@ mod tests {
     #[test]
     fn ignores_multi_word_edits() {
         // Two words changed = rewrite, not a recognition fix.
-        assert!(detect_correction(
-            "Fix the kwen model bug.",
-            "Fix the qwen model issue."
-        )
-        .is_none());
+        assert!(
+            detect_correction("Fix the kwen model bug.", "Fix the qwen model issue.").is_none()
+        );
     }
 
     #[test]
     fn ignores_high_distance_edits() {
         // 4+ char edit distance is more rewrite than recognition.
-        assert!(detect_correction(
-            "Install elephantine.",
-            "Install programmable."
-        )
-        .is_none());
+        assert!(detect_correction("Install elephantine.", "Install programmable.").is_none());
     }
 
     #[test]

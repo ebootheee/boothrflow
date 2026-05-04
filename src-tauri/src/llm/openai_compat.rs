@@ -123,7 +123,11 @@ impl OpenAiCompatLlmCleanup {
     }
 
     fn keep_alive_for_endpoint(&self) -> &'static str {
-        if self.looks_like_ollama() { "5m" } else { "" }
+        if self.looks_like_ollama() {
+            "5m"
+        } else {
+            ""
+        }
     }
 
     /// Send a tiny dummy request so the backend loads the model into VRAM

@@ -51,10 +51,7 @@ pub fn build_system_prompt(inputs: &CleanupPromptInputs<'_>) -> String {
     let mut out = String::with_capacity(2048);
     out.push_str(&base_system_prompt(inputs.style));
 
-    let corrections = correction_section(
-        inputs.preferred_transcriptions,
-        inputs.commonly_misheard,
-    );
+    let corrections = correction_section(inputs.preferred_transcriptions, inputs.commonly_misheard);
     if !corrections.is_empty() {
         out.push_str("\n\n");
         out.push_str(&corrections);
@@ -128,10 +125,7 @@ fn build_captains_log_prompt() -> String {
     )
 }
 
-fn correction_section(
-    preferred: &[String],
-    misheard: &[MisheardReplacement],
-) -> String {
+fn correction_section(preferred: &[String], misheard: &[MisheardReplacement]) -> String {
     let preferred_clean: Vec<&str> = preferred
         .iter()
         .map(|s| s.trim())
@@ -321,10 +315,7 @@ mod tests {
         };
         let prompt = build_system_prompt(&inputs);
         assert!(prompt.contains("<WINDOW-OCR-CONTENT>"));
-        let after = prompt
-            .split("<WINDOW-OCR-CONTENT>\n")
-            .nth(1)
-            .unwrap_or("");
+        let after = prompt.split("<WINDOW-OCR-CONTENT>\n").nth(1).unwrap_or("");
         let xs = after.chars().take_while(|c| *c == 'X').count();
         assert_eq!(xs, MAX_OCR_CHARS);
     }

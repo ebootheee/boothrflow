@@ -19,8 +19,8 @@
 //!   inner span; we read whichever is reported and accept the loss.
 
 use accessibility_sys::{
-    kAXFocusedUIElementAttribute, kAXSelectedTextAttribute, kAXValueAttribute,
-    AXError, AXUIElementCopyAttributeValue, AXUIElementCreateSystemWide, AXUIElementRef,
+    kAXFocusedUIElementAttribute, kAXSelectedTextAttribute, kAXValueAttribute, AXError,
+    AXUIElementCopyAttributeValue, AXUIElementCreateSystemWide, AXUIElementRef,
 };
 use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
 use core_foundation::string::{CFString, CFStringRef};
@@ -44,7 +44,9 @@ impl FocusedTextReader for MacosFocusedTextReader {
         // individual AX calls already use error-return semantics,
         // not panics, but a misbehaving objc2 binding upstream could
         // still trip a debug_assert.
-        std::panic::catch_unwind(read_focused_text_inner).ok().flatten()
+        std::panic::catch_unwind(read_focused_text_inner)
+            .ok()
+            .flatten()
     }
 
     fn name(&self) -> &str {
@@ -99,17 +101,11 @@ fn read_focused_text_inner() -> Option<String> {
 /// non-success error code (no permission, no such attribute, …).
 /// Caller takes ownership of the returned CFTypeRef and must
 /// `CFRelease` it.
-unsafe fn copy_attribute(
-    element: AXUIElementRef,
-    attribute: &str,
-) -> Option<CFTypeRef> {
+unsafe fn copy_attribute(element: AXUIElementRef, attribute: &str) -> Option<CFTypeRef> {
     let attr = CFString::new(attribute);
     let mut value: CFTypeRef = std::ptr::null();
-    let err: AXError = AXUIElementCopyAttributeValue(
-        element,
-        attr.as_concrete_TypeRef(),
-        &mut value,
-    );
+    let err: AXError =
+        AXUIElementCopyAttributeValue(element, attr.as_concrete_TypeRef(), &mut value);
     if err == 0 && !value.is_null() {
         Some(value)
     } else {

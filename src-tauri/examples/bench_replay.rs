@@ -131,10 +131,7 @@ fn main() -> Result<()> {
     let llm_endpoint = app_settings.llm.endpoint.clone();
     let llm_model = app_settings.llm.model.clone();
     let llm_api_key = app_settings.llm.api_key.clone();
-    eprintln!(
-        "LLM: {} (endpoint={})",
-        llm_model, llm_endpoint
-    );
+    eprintln!("LLM: {} (endpoint={})", llm_model, llm_endpoint);
 
     // Pre-build LLM client (reused across variants).
     let llm = OpenAiCompatLlmCleanup::new(
@@ -143,10 +140,7 @@ fn main() -> Result<()> {
         llm_api_key.filter(|k| !k.trim().is_empty()),
     )?;
 
-    let styles = [
-        ("casual", Style::Casual),
-        ("raw", Style::Raw),
-    ];
+    let styles = [("casual", Style::Casual), ("raw", Style::Raw)];
 
     let mut total_variants = 0usize;
     for wav_path in wavs {
@@ -157,7 +151,10 @@ fn main() -> Result<()> {
             .to_string();
         let variants_path = wav_path.with_extension("variants.json");
 
-        eprintln!("\n[{}]", wav_path.file_name().and_then(|s| s.to_str()).unwrap_or("?"));
+        eprintln!(
+            "\n[{}]",
+            wav_path.file_name().and_then(|s| s.to_str()).unwrap_or("?")
+        );
         let audio = match read_wav(&wav_path) {
             Ok(a) => a,
             Err(e) => {
@@ -182,11 +179,7 @@ fn main() -> Result<()> {
                 }
             };
             let stt_ms = stt_started.elapsed().as_millis() as u64;
-            eprintln!(
-                "    raw ({} ms): {}",
-                stt_ms,
-                preview(&raw, 80)
-            );
+            eprintln!("    raw ({} ms): {}", stt_ms, preview(&raw, 80));
 
             for (style_name, style) in &styles {
                 let formatted_started = Instant::now();
@@ -261,9 +254,7 @@ fn main() -> Result<()> {
     eprintln!(
         "Grade by editing the `grade` field (1-5) and `notes` (string) in each .variants.json,"
     );
-    eprintln!(
-        "or wait for the in-app grading UI (Wave 7 candidate)."
-    );
+    eprintln!("or wait for the in-app grading UI (Wave 7 candidate).");
     Ok(())
 }
 
@@ -285,10 +276,7 @@ fn list_wavs(dir: &Path) -> Vec<PathBuf> {
 #[cfg(feature = "real-engines")]
 fn read_wav(path: &Path) -> Result<Vec<f32>> {
     let mut reader = hound::WavReader::open(path).map_err(|e| {
-        boothrflow_lib::error::BoothError::internal(format!(
-            "open wav {}: {e}",
-            path.display()
-        ))
+        boothrflow_lib::error::BoothError::internal(format!("open wav {}: {e}", path.display()))
     })?;
     let spec = reader.spec();
     if spec.channels != 1 {
@@ -380,10 +368,9 @@ impl SttConfig {
 
 #[cfg(feature = "real-engines")]
 fn discover_stt_configs() -> Result<Vec<SttConfig>> {
-    let models_dir = boothrflow_lib::stt::default_models_dir()
-        .ok_or_else(|| {
-            boothrflow_lib::error::BoothError::internal("could not resolve models dir")
-        })?;
+    let models_dir = boothrflow_lib::stt::default_models_dir().ok_or_else(|| {
+        boothrflow_lib::error::BoothError::internal("could not resolve models dir")
+    })?;
 
     let mut configs = Vec::new();
 

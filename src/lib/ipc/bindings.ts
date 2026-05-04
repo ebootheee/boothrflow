@@ -88,6 +88,14 @@ export const commands = {
 	 *  across macOS / Windows / Linux.
 	 */
 	revealPath: (path: string) => typedError<null, BoothError>(__TAURI_INVOKE("reveal_path", { path })),
+	benchList: () => typedError<CaptureRow[], BoothError>(__TAURI_INVOKE("bench_list")),
+	benchLoad: (wavFilename: string) => typedError<{
+	wav: string,
+	audio_seconds: number,
+	variants: Variant[],
+} | null, BoothError>(__TAURI_INVOKE("bench_load", { wavFilename })),
+	benchSave: (wavFilename: string, variants: VariantsFile) => typedError<null, BoothError>(__TAURI_INVOKE("bench_save", { wavFilename, variants })),
+	benchWavPath: (wavFilename: string) => typedError<string, BoothError>(__TAURI_INVOKE("bench_wav_path", { wavFilename })),
 };
 
 /* Types */
@@ -137,6 +145,23 @@ export type AppStyleOverride = {
  *  because the payload can't be merged with the tag at the same level).
  */
 export type BoothError = { kind: "audio-capture"; message: string } | { kind: "transcription"; message: string } | { kind: "formatting"; message: string } | { kind: "injection"; message: string } | { kind: "internal"; message: string };
+
+export type CaptureRow = {
+	wav_filename: string,
+	captured_at: string,
+	app_exe: string | null,
+	audio_seconds: number,
+	// Engine that produced the original capture (sidecar `engine` field).
+	original_engine: string,
+	raw: string,
+	formatted: string,
+	// Has a sibling `<stem>.variants.json`?
+	has_variants: boolean,
+	// Number of variants in the variants file.
+	variant_count: number,
+	// Number of variants that have a `grade` field set.
+	graded_count: number,
+};
 
 export type DictateResult = {
 	raw: string,
@@ -272,6 +297,25 @@ export type Style = "raw" | "formal" | "casual" | "excited" | "very-casual" |
  *  24th-century rewrite. See ROADMAP § Phase 2 / Style presets.
  */
 "captains-log";
+
+export type Variant = {
+	config_id: string,
+	engine: string,
+	llm_model: string,
+	style: string,
+	raw: string,
+	formatted: string,
+	stt_ms: number,
+	llm_ms: number,
+	grade?: number | null,
+	notes?: string | null,
+};
+
+export type VariantsFile = {
+	wav: string,
+	audio_seconds: number,
+	variants: Variant[],
+};
 
 export type WhisperDownloadResult = {
 	model: string,

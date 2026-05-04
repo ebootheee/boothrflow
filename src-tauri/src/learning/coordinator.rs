@@ -80,9 +80,7 @@ fn run_observation(
     // toggled auto-learn off — or flipped privacy mode on — during the
     // settling window. Either way, abort silently before sampling.
     let settings_after_sleep = crate::settings::current_app_settings();
-    if !settings_after_sleep.auto_learn_corrections
-        || crate::settings::privacy_mode_enabled()
-    {
+    if !settings_after_sleep.auto_learn_corrections || crate::settings::privacy_mode_enabled() {
         return Ok(());
     }
 
@@ -112,10 +110,7 @@ fn run_observation(
         .map(|t| t.trim())
         .any(|t| t.eq_ignore_ascii_case(&pair.wrong));
     if already_preferred {
-        tracing::trace!(
-            "learning: {} already in vocabulary, skipping",
-            pair.wrong
-        );
+        tracing::trace!("learning: {} already in vocabulary, skipping", pair.wrong);
         return Ok(());
     }
 

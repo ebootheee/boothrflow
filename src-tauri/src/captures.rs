@@ -93,8 +93,8 @@ pub fn save(audio: &[f32], meta: CaptureMetadata<'_>) -> Result<PathBuf> {
 }
 
 fn captures_dir() -> Result<PathBuf> {
-    let base = dirs::data_dir()
-        .ok_or_else(|| BoothError::internal("could not resolve user data dir"))?;
+    let base =
+        dirs::data_dir().ok_or_else(|| BoothError::internal("could not resolve user data dir"))?;
     Ok(base.join("boothrflow").join("captures"))
 }
 

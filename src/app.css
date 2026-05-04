@@ -795,6 +795,316 @@ kbd {
   text-decoration: underline;
 }
 
+/* Benchmarks tab — captures list on the left, detail/grading panel on the
+   right. The detail panel auditions the wav and grades each replay variant
+   1-5 stars. Grades persist back to <stem>.variants.json next to the wav. */
+.bench-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 320px;
+}
+
+.bench-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: #fff;
+  padding: 8px;
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+.bench-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.bench-empty {
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 8px;
+}
+
+.bench-row-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+button.bench-row {
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: #fff;
+  text-align: left;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+button.bench-row:hover {
+  background: var(--muted);
+}
+
+button.bench-row.selected {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.bench-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.bench-row-mid {
+  color: var(--subtle);
+  font-size: 11px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.bench-row-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.bench-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: #fff;
+  padding: 10px;
+  min-width: 0;
+}
+
+.bench-audio {
+  width: 100%;
+  height: 32px;
+}
+
+.bench-leaderboard {
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: #fbfcfc;
+  padding: 8px 10px;
+}
+
+.bench-leaderboard strong {
+  display: block;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 760;
+  margin-bottom: 4px;
+}
+
+.bench-leaderboard ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.bench-leaderboard li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.lb-config {
+  color: var(--ink);
+  font-weight: 720;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lb-mean {
+  color: var(--brand);
+  font-weight: 760;
+}
+
+.lb-count {
+  color: var(--subtle);
+}
+
+.variant-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.variant-card {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: #fbfcfc;
+  padding: 8px 10px;
+}
+
+.variant-card-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.variant-card-head strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.variant-card-head small {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.variant-text {
+  display: grid;
+  gap: 6px;
+}
+
+.variant-text label {
+  display: grid;
+  gap: 2px;
+}
+
+.variant-text label span {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.variant-text textarea {
+  resize: vertical;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 5px 7px;
+}
+
+.variant-grade {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.variant-grade-label {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.star-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+button.star-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  color: var(--line);
+  padding: 3px;
+}
+
+button.star-btn:hover {
+  color: var(--brand);
+}
+
+button.star-btn.filled {
+  color: var(--brand);
+  fill: var(--brand);
+}
+
+button.star-btn.filled svg {
+  fill: currentColor;
+}
+
+.grade-readout {
+  margin-left: 6px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.variant-notes {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.variant-notes span {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.variant-notes input {
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 4px 7px;
+}
+
+.bench-save-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bench-save-status {
+  color: var(--subtle);
+  font-size: 12px;
+}
+
 .settings-section {
   display: grid;
   align-content: start;
