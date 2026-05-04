@@ -514,58 +514,53 @@ pub fn whisper_models() -> Vec<WhisperModel> {
             value: "tiny.en",
             file: "ggml-tiny.en.bin",
             available: true,
-            label: "Whisper tiny.en (39M, 75MB)",
-            detail: "Fastest, lowest accuracy.",
+            label: "Whisper tiny.en — live preview (39M, 75MB)",
+            detail: "Live transcript appears as you talk. Fastest, lowest accuracy of the Whisper variants.",
             download_arg: "tiny",
         },
         WhisperModel {
             value: "base.en",
             file: "ggml-base.en.bin",
             available: true,
-            label: "Whisper base.en (74M, 142MB)",
-            detail: "Still quick, noticeably cleaner than tiny.",
+            label: "Whisper base.en — live preview (74M, 142MB)",
+            detail: "Live transcript appears as you talk. Quick, noticeably cleaner than tiny.",
             download_arg: "base",
         },
         WhisperModel {
             value: "small.en",
             file: "ggml-small.en.bin",
             available: true,
-            label: "Whisper small.en (244M, 466MB)",
-            detail: "Recommended quality/speed balance.",
+            label: "Whisper small.en — live preview (244M, 466MB)",
+            detail: "Live transcript appears as you talk. Recommended Whisper balance of quality and speed.",
             download_arg: "small",
         },
         WhisperModel {
             value: "medium.en",
             file: "ggml-medium.en.bin",
             available: true,
-            label: "Whisper medium.en (769M, 1.5GB)",
-            detail: "Better accuracy, higher latency.",
+            label: "Whisper medium.en — live preview (769M, 1.5GB)",
+            detail: "Live transcript appears as you talk. Better accuracy, higher latency.",
             download_arg: "medium",
         },
         WhisperModel {
             value: "large-v3-turbo",
             file: "ggml-large-v3-turbo.bin",
             available: true,
-            label: "Whisper large-v3-turbo (809M, 1.6GB)",
-            detail: "Best local quality option for strong Macs.",
+            label: "Whisper large-v3-turbo — live preview (809M, 1.6GB)",
+            detail: "Live transcript appears as you talk. Highest-quality Whisper variant; best for M-series Macs.",
             download_arg: "large-v3-turbo",
         },
-        // NVIDIA Parakeet TDT 0.6B v3 — wired via sherpa-onnx behind
-        // the `parakeet-engine` Cargo feature. Selectability mirrors the
-        // build configuration: when the binary was built without the
-        // feature, the FE picker disables this row so users see why
-        // it's there but can't accidentally pick a non-functional path.
-        // See ADR-009 + `docs/waves/wave-5-context-aware-cleanup.md`.
+        // NVIDIA Parakeet TDT 0.6B — offline-only by design. The currently-
+        // published v2-int8 sherpa-onnx bundle doesn't ship a streaming
+        // export, so the pill stays empty during PTT and the final
+        // transcript appears on release. See `docs/waves/
+        // wave-5-context-aware-cleanup.md` for the streaming follow-up.
         WhisperModel {
             value: "parakeet-tdt-0.6b-v3",
-            // Treated as a directory (not a single file) — see
-            // `parakeet_model_dir()`. Filename here is a sentinel for
-            // the resolution layer; the real model layout is
-            // `${dir}/{encoder,decoder,joiner}.onnx + tokens.txt`.
             file: "parakeet-tdt-0.6b-v3",
             available: cfg!(feature = "parakeet-engine"),
-            label: "NVIDIA Parakeet TDT 0.6B v3 (preview)",
-            detail: "Faster + more accurate than Whisper. Requires `pnpm download:model parakeet` and `--features parakeet-engine` build.",
+            label: "NVIDIA Parakeet TDT 0.6B — final transcript only (preview)",
+            detail: "Highest accuracy on technical jargon (Qwen, OpenAI, file paths, etc). No live preview while talking — transcript appears on release. English only.",
             download_arg: "parakeet",
         },
     ]

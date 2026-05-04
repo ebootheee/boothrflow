@@ -1012,6 +1012,14 @@
                     </div>
                   </div>
 
+                  <p class="settings-help">
+                    Two engine families. <strong>Whisper</strong> shows a live transcript in the
+                    pill while you talk and supports 99 languages. <strong>Parakeet</strong>
+                    is more accurate on technical jargon and ~3× faster, but English-only and shows the
+                    transcript only after you release the hotkey (no live preview). Pick by use case —
+                    both are local and private.
+                  </p>
+
                   <label class="settings-field">
                     <span>Speech-to-text model</span>
                     <select
