@@ -760,9 +760,22 @@ fn json<T: Serialize>(value: T) -> Result<JsonValue> {
 }
 
 fn default_whisper_model() -> String {
-    std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE")
-        .map(|file| normalize_whisper_model(&file))
-        .unwrap_or_else(|_| "tiny.en".into())
+    if let Ok(file) = std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE") {
+        return normalize_whisper_model(&file);
+    }
+    // Production builds enable `parakeet-engine` and ship the Parakeet
+    // TDT 0.6B model — best transcription quality on our benchmarks
+    // (named entities, semantic stability) at the cost of higher first-token
+    // latency. Inner-loop dev builds (no parakeet-engine) fall back to
+    // tiny.en so the dev loop stays light.
+    #[cfg(feature = "parakeet-engine")]
+    {
+        "parakeet-tdt-0.6b-v3".into()
+    }
+    #[cfg(not(feature = "parakeet-engine"))]
+    {
+        "tiny.en".into()
+    }
 }
 
 fn default_ptt_hotkey() -> String {

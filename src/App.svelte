@@ -142,10 +142,11 @@
   let activeSettingsSection = $state<SettingsSection>("general");
 
   // Benchmarks tab state. Captures (`<stem>.wav` + `<stem>.json`) come from
-  // the `BOOTHRFLOW_SAVE_CAPTURES=1` runtime hook in `session::transcribe_and_emit`.
+  // the `BOOTHRFLOW_DEV=1` runtime hook in `session::transcribe_and_emit`.
   // Variants (`<stem>.variants.json`) come from `pnpm bench:replay`. The
   // grading UI here is the consumer half — list captures, audition the wav,
-  // grade each config 1-5 with optional notes, save back to disk.
+  // grade each config 1-5 with optional notes, save back to disk. The whole
+  // tab is hidden in production builds — see `devModeEnabled` below.
   type BenchCapture = {
     wav_filename: string;
     captured_at: string;
@@ -183,6 +184,11 @@
   let selectedWavSrc = $state<string | null>(null);
   let benchSaving = $state(false);
   let benchSaveStatus = $state<string | null>(null);
+
+  // Developer mode toggle. Set by `BOOTHRFLOW_DEV=1` at app launch — gates
+  // the Benchmarks sidebar entry + capture-to-disk in `session.rs`.
+  // Probed once on mount; probes stay false in non-Tauri (storybook) mode.
+  let devModeEnabled = $state(false);
 
   // Wave 4b polish surfaces — autostart toggle, LLM connection probe, and
   // app metadata for the About section. Loaded on Settings open.
@@ -695,11 +701,22 @@
       .sort((a, b) => b.mean - a.mean);
   });
 
+  async function probeDevMode() {
+    if (!inDesktop) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      devModeEnabled = await invoke<boolean>("dev_mode_enabled");
+    } catch {
+      devModeEnabled = false;
+    }
+  }
+
   onMount(() => {
     void settings.load();
     void dictationStore.attach();
     void loadHistory();
     void probeMicrophone();
+    void probeDevMode();
   });
 
   // Refresh history whenever a fresh dictation completes so the new entry
@@ -874,13 +891,15 @@
                 onclick={() => (activeSettingsSection = "history")}
                 ><Icon name="database" size={14} /> History</button
               >
-              <button
-                type="button"
-                class="settings-nav-item"
-                class:active={activeSettingsSection === "benchmarks"}
-                onclick={() => (activeSettingsSection = "benchmarks")}
-                ><Icon name="bar-chart" size={14} /> Benchmarks</button
-              >
+              {#if devModeEnabled}
+                <button
+                  type="button"
+                  class="settings-nav-item"
+                  class:active={activeSettingsSection === "benchmarks"}
+                  onclick={() => (activeSettingsSection = "benchmarks")}
+                  ><Icon name="bar-chart" size={14} /> Benchmarks</button
+                >
+              {/if}
               <button
                 type="button"
                 class="settings-nav-item"
@@ -1326,7 +1345,7 @@
                     />
                   </label>
                 </section>
-              {:else if activeSettingsSection === "benchmarks"}
+              {:else if activeSettingsSection === "benchmarks" && devModeEnabled}
                 <section class="settings-section">
                   <div class="settings-section-head">
                     <span class="step-icon"><Icon name="bar-chart" size={14} /></span>
@@ -1336,7 +1355,7 @@
                     </div>
                   </div>
                   <p class="settings-help">
-                    Captures saved with <code>BOOTHRFLOW_SAVE_CAPTURES=1</code>. Run
+                    Captures saved with <code>BOOTHRFLOW_DEV=1</code>. Run
                     <code>pnpm bench:replay</code> to fan each wav out across every available STT/LLM/style
                     combo, then grade the variants here. 1-5 stars per variant; click a star to set, click
                     the same star again to clear. Notes are free-form.
@@ -1365,7 +1384,7 @@
                       {#if benchCaptures.length === 0 && !benchLoading}
                         <div class="bench-empty">
                           No captures yet. Set
-                          <code>BOOTHRFLOW_SAVE_CAPTURES=1</code> when launching the app and dictate something.
+                          <code>BOOTHRFLOW_DEV=1</code> when launching the app and dictate something.
                         </div>
                       {/if}
                       <ul class="bench-row-list">

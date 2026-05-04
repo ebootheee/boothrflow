@@ -96,6 +96,14 @@ export const commands = {
 } | null, BoothError>(__TAURI_INVOKE("bench_load", { wavFilename })),
 	benchSave: (wavFilename: string, variants: VariantsFile) => typedError<null, BoothError>(__TAURI_INVOKE("bench_save", { wavFilename, variants })),
 	benchWavPath: (wavFilename: string) => typedError<string, BoothError>(__TAURI_INVOKE("bench_wav_path", { wavFilename })),
+	/**
+	 *  Returns true when the app was launched with `BOOTHRFLOW_DEV=1`.
+	 *  The FE uses this to gate developer-only surfaces (Benchmarks tab,
+	 *  future engine pickers, etc.) so production builds stay clean for end
+	 *  users. Available in both feature variants — the test-fakes build
+	 *  answers honestly even though most dev surfaces aren't wired up there.
+	 */
+	devModeEnabled: () => __TAURI_INVOKE<boolean>("dev_mode_enabled"),
 };
 
 /* Types */

@@ -1,8 +1,9 @@
-//! Optional capture-to-disk for benchmarking.
+//! Optional capture-to-disk for benchmarking. Part of developer mode.
 //!
-//! When `BOOTHRFLOW_SAVE_CAPTURES=1` is set in the environment, every
+//! When `BOOTHRFLOW_DEV=1` is set in the environment, every
 //! successful dictation writes its audio buffer + metadata pair to
-//! the user's data directory:
+//! the user's data directory. The same flag also unlocks the
+//! Benchmarks tab in Settings (see `commands::dev_mode_enabled`).
 //!
 //! ```text
 //! ~/Library/Application Support/boothrflow/captures/
@@ -38,7 +39,7 @@ use serde::Serialize;
 
 use crate::error::{BoothError, Result};
 
-const ENV_FLAG: &str = "BOOTHRFLOW_SAVE_CAPTURES";
+const ENV_FLAG: &str = "BOOTHRFLOW_DEV";
 const SAMPLE_RATE_HZ: u32 = 16_000;
 
 #[derive(Serialize)]

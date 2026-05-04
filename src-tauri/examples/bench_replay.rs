@@ -102,7 +102,7 @@ fn main() -> Result<()> {
 
     if !captures_dir.exists() {
         eprintln!("no captures directory at {}", captures_dir.display());
-        eprintln!("run with `BOOTHRFLOW_SAVE_CAPTURES=1 pnpm dev:parakeet` first");
+        eprintln!("run with `BOOTHRFLOW_DEV=1 pnpm dev:parakeet` first");
         std::process::exit(2);
     }
 
@@ -126,19 +126,42 @@ fn main() -> Result<()> {
         eprintln!("  - {}", c.engine_label);
     }
 
-    // Use the user's currently-configured LLM endpoint + model.
+    // Use the user's configured LLM endpoint, but fan out across every
+    // candidate model. The user's currently-configured model is always
+    // included; others are added if they answer a quick handshake.
     let app_settings = settings::current_app_settings();
     let llm_endpoint = app_settings.llm.endpoint.clone();
-    let llm_model = app_settings.llm.model.clone();
     let llm_api_key = app_settings.llm.api_key.clone();
-    eprintln!("LLM: {} (endpoint={})", llm_model, llm_endpoint);
+    let configured_model = app_settings.llm.model.clone();
+    eprintln!("LLM endpoint: {}", llm_endpoint);
 
-    // Pre-build LLM client (reused across variants).
-    let llm = OpenAiCompatLlmCleanup::new(
-        llm_endpoint.clone(),
-        llm_model.clone(),
-        llm_api_key.filter(|k| !k.trim().is_empty()),
-    )?;
+    // Candidate chat models to try. The configured model goes first so it
+    // always shows up. Add more here as we add support — e.g.
+    // "qwen2.5:0.5b", "llama3.2:3b", whatever you want benched.
+    let mut llm_candidates: Vec<String> = vec![configured_model.clone()];
+    for extra in ["qwen2.5:7b", "qwen2.5:1.5b"] {
+        if !llm_candidates.iter().any(|m| m == extra) {
+            llm_candidates.push(extra.to_string());
+        }
+    }
+    let mut llm_clients: Vec<(String, OpenAiCompatLlmCleanup)> = Vec::new();
+    for model in &llm_candidates {
+        match OpenAiCompatLlmCleanup::new(
+            llm_endpoint.clone(),
+            model.clone(),
+            llm_api_key.clone().filter(|k| !k.trim().is_empty()),
+        ) {
+            Ok(client) => {
+                eprintln!("  llm: {model}");
+                llm_clients.push((model.clone(), client));
+            }
+            Err(e) => eprintln!("  llm: {model} unavailable ({e}), skipping"),
+        }
+    }
+    if llm_clients.is_empty() {
+        eprintln!("no usable LLM models");
+        std::process::exit(4);
+    }
 
     let styles = [("casual", Style::Casual), ("raw", Style::Raw)];
 
@@ -182,46 +205,66 @@ fn main() -> Result<()> {
             eprintln!("    raw ({} ms): {}", stt_ms, preview(&raw, 80));
 
             for (style_name, style) in &styles {
-                let formatted_started = Instant::now();
-                let formatted = if matches!(style, Style::Raw) {
-                    raw.clone()
-                } else {
-                    match llm.cleanup(CleanupRequest {
+                if matches!(style, Style::Raw) {
+                    // Raw doesn't touch the LLM — emit one variant per STT,
+                    // not one per (STT × LLM).
+                    let config_id =
+                        format!("{} + (no llm) + {}", stt_config.engine_label, style_name);
+                    eprintln!("    → {} → {}", style_name, preview(&raw, 80));
+                    variants.push(Variant {
+                        config_id,
+                        engine: stt_config.engine_label.clone(),
+                        llm_model: "(none)".to_string(),
+                        style: (*style_name).to_string(),
+                        raw: raw.clone(),
+                        formatted: raw.clone(),
+                        stt_ms,
+                        llm_ms: 0,
+                        grade: None,
+                        notes: None,
+                    });
+                    total_variants += 1;
+                    continue;
+                }
+                for (llm_model_name, llm) in &llm_clients {
+                    let formatted_started = Instant::now();
+                    let formatted = match llm.cleanup(CleanupRequest {
                         raw_text: &raw,
                         style: *style,
                         ..Default::default()
                     }) {
                         Ok(out) => out.text,
                         Err(e) => {
-                            eprintln!("    llm failed: {e}");
-                            raw.clone()
+                            eprintln!("    llm {llm_model_name} failed: {e}");
+                            continue;
                         }
-                    }
-                };
-                let llm_ms = if matches!(style, Style::Raw) {
-                    0
-                } else {
-                    formatted_started.elapsed().as_millis() as u64
-                };
+                    };
+                    let llm_ms = formatted_started.elapsed().as_millis() as u64;
 
-                let config_id = format!(
-                    "{} + {} + {}",
-                    stt_config.engine_label, llm_model, style_name
-                );
-                eprintln!("    → {} → {}", style_name, preview(&formatted, 80));
-                variants.push(Variant {
-                    config_id,
-                    engine: stt_config.engine_label.clone(),
-                    llm_model: llm_model.clone(),
-                    style: (*style_name).to_string(),
-                    raw: raw.clone(),
-                    formatted,
-                    stt_ms,
-                    llm_ms,
-                    grade: None,
-                    notes: None,
-                });
-                total_variants += 1;
+                    let config_id = format!(
+                        "{} + {} + {}",
+                        stt_config.engine_label, llm_model_name, style_name
+                    );
+                    eprintln!(
+                        "    → {} + {} → {}",
+                        llm_model_name,
+                        style_name,
+                        preview(&formatted, 80)
+                    );
+                    variants.push(Variant {
+                        config_id,
+                        engine: stt_config.engine_label.clone(),
+                        llm_model: llm_model_name.clone(),
+                        style: (*style_name).to_string(),
+                        raw: raw.clone(),
+                        formatted,
+                        stt_ms,
+                        llm_ms,
+                        grade: None,
+                        notes: None,
+                    });
+                    total_variants += 1;
+                }
             }
         }
 

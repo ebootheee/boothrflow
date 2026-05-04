@@ -565,8 +565,8 @@ mod real {
             );
         }
 
-        // Optional benchmark capture — gated on `BOOTHRFLOW_SAVE_CAPTURES`
-        // env var. Saves the audio buffer + a JSON sidecar with the raw
+        // Optional benchmark capture — gated on `BOOTHRFLOW_DEV` env var
+        // (the umbrella developer-mode flag). Saves the audio buffer + a JSON sidecar with the raw
         // transcript, cleaned text, and timing breakdown to the user data
         // dir's `captures/` directory. See `captures.rs` for the layout.
         // Skipped under privacy mode for the same reason cleanup is skipped.

@@ -635,3 +635,17 @@ pub fn bench_wav_path(wav_filename: String) -> Result<String, BoothError> {
         .to_string_lossy()
         .into_owned())
 }
+
+/// Returns true when the app was launched with `BOOTHRFLOW_DEV=1`.
+/// The FE uses this to gate developer-only surfaces (Benchmarks tab,
+/// future engine pickers, etc.) so production builds stay clean for end
+/// users. Available in both feature variants — the test-fakes build
+/// answers honestly even though most dev surfaces aren't wired up there.
+#[tauri::command]
+#[specta::specta]
+pub fn dev_mode_enabled() -> bool {
+    matches!(
+        std::env::var("BOOTHRFLOW_DEV").ok().as_deref(),
+        Some("1") | Some("true") | Some("yes")
+    )
+}
