@@ -38,6 +38,14 @@ name = "export_bindings"
 name = "parakeet_probe"
 required-features = ["real-engines", "parakeet-engine"]
 
+# Replays every captured wav through every available STT/LLM/style
+# config and writes a `<stem>.variants.json` next to each wav. Pair
+# with the grading UI (Wave 7 candidate) to score variants instead
+# of typing verbatim ground truth.
+[[example]]
+name = "bench_replay"
+required-features = ["real-engines"]
+
 # ──────────────────────────────────────────────────────────────────────────
 # Features
 #
