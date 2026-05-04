@@ -20,31 +20,56 @@ const KEYRING_EMBED_ACCOUNT: &str = "embed_api_key";
 const CURRENT_SCHEMA_VERSION: u16 = 1;
 const STORE_FILE: &str = "boothrflow.settings.json";
 
+/// Cleanup style — picks how aggressively the LLM may restructure the raw
+/// transcript. The axis is **structuring aggressiveness**, not tone:
+/// users empirically don't switch tones, but they do switch between
+/// "leave my words alone" and "organize this brain dump for me." See
+/// `docs/waves/wave-6-engine-and-formatting.md` Phase 0.
+///
+/// The legacy tone-based variants (Casual, Formal, VeryCasual, Excited)
+/// auto-migrate via serde aliases — old persisted settings deserialize
+/// straight into the new variants on read. On the next save, the new
+/// canonical names land in the JSON so the alias path is one-time.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Style {
+    /// No cleanup, paste verbatim. Code dictation, exact-quote capture.
     Raw = 0,
-    Formal = 1,
+    /// Grammar + light punctuation; paragraph kept as-is. The "what
+    /// we've been doing" baseline. Maps from the legacy Casual / VeryCasual
+    /// / Excited tone variants — those were noise relative to structure.
     #[default]
-    Casual = 2,
-    Excited = 3,
-    VeryCasual = 4,
+    #[serde(alias = "casual", alias = "very-casual", alias = "excited")]
+    Light = 1,
+    /// Light cleanup *plus* paragraph splits at natural breaks; removes
+    /// filler ("um," "you know," repeated false starts). Formal users
+    /// land here because their preference reads as "more cleaned up,"
+    /// not "different tone."
+    #[serde(alias = "formal")]
+    Moderate = 2,
+    /// LLM has full freedom to restructure: bullets when listing,
+    /// paragraph breaks at sentence-boundary pauses, code fences for
+    /// "in code" cues, greeting + signature when focused app is Mail.
+    /// Long brain dumps come back as memos. New variant — no alias.
+    Assertive = 3,
     /// Star-Trek-style log entry. Computed stardate prefix + formal
-    /// 24th-century rewrite. See ROADMAP § Phase 2 / Style presets.
+    /// 24th-century rewrite. Orthogonal to the structure axis — kept
+    /// as a fun preset.
     CaptainsLog = 5,
 }
 
 impl Style {
     /// How aggressively the cleanup pass should rewrite the raw transcript.
     /// `0` preserves every word verbatim; `1` drops disfluencies and
-    /// self-corrections; `2` allows light paraphrase. Casual/Formal/Excited
-    /// default to 1 because the prior "preserve words exactly" prompt let
-    /// mumbling and false starts ride through (Wave 3 UAT). Captain's Log
-    /// stays at 1 since paraphrase risks hallucinating canon.
+    /// self-corrections; `2` allows paragraph restructuring;
+    /// `3` allows full structural rewrite (bullets, headers, signatures).
+    /// Captain's Log stays at 1 since paraphrase risks hallucinating canon.
     pub fn aggressiveness(&self) -> u8 {
         match self {
             Self::Raw => 0,
-            Self::Formal | Self::Casual | Self::Excited | Self::VeryCasual | Self::CaptainsLog => 1,
+            Self::Light | Self::CaptainsLog => 1,
+            Self::Moderate => 2,
+            Self::Assertive => 3,
         }
     }
 }

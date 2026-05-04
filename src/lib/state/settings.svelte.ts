@@ -30,7 +30,7 @@ import type {
 
 const defaultSettings: AppSettings = {
   schema_version: 1,
-  style: "casual",
+  style: "light",
   privacy_mode: false,
   whisper: { model: "tiny.en" },
   llm: {

@@ -163,7 +163,15 @@ fn main() -> Result<()> {
         std::process::exit(4);
     }
 
-    let styles = [("casual", Style::Casual), ("raw", Style::Raw)];
+    // Per-style fan-out for the bench. Light is the new default (was
+    // Casual). Assertive added so the structure-aggressiveness axis gets
+    // empirical grading on the same captures.
+    let styles = [
+        ("light", Style::Light),
+        ("moderate", Style::Moderate),
+        ("assertive", Style::Assertive),
+        ("raw", Style::Raw),
+    ];
 
     let mut total_variants = 0usize;
     for wav_path in wavs {

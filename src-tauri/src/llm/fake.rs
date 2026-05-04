@@ -62,10 +62,14 @@ fn apply_style(text: &str, style: &Style) -> String {
     let rest: String = chars.collect();
     match style {
         Style::Raw => text.to_string(),
-        Style::Formal => format!("{}{}.", first.to_uppercase(), rest),
-        Style::Casual => format!("{}{}", first.to_lowercase(), rest),
-        Style::Excited => format!("{}{}!", first.to_uppercase(), rest),
-        Style::VeryCasual => text.to_lowercase(),
+        // Light = baseline cleanup: capitalize first letter, period at end.
+        Style::Light => format!("{}{}.", first.to_uppercase(), rest),
+        // Moderate = same as Light in the fake; structural rewrites need a
+        // real LLM. Tests just check that the style routes correctly.
+        Style::Moderate => format!("{}{}.", first.to_uppercase(), rest),
+        // Assertive = wraps with a "[fmt]" marker so tests can verify the
+        // style flowed through. Real LLM does the actual restructure.
+        Style::Assertive => format!("[fmt] {}{}.", first.to_uppercase(), rest),
         Style::CaptainsLog => format!(
             "Captain's log, stardate {}. {}{}.  End log.",
             crate::llm::stardate_label(),
@@ -100,17 +104,30 @@ mod tests {
     }
 
     #[test]
-    fn formal_style_ends_with_period() {
+    fn light_style_ends_with_period() {
         let llm = FakeLlmCleanup;
         let out = llm
             .cleanup(CleanupRequest {
                 raw_text: "ship it",
-                style: Style::Formal,
+                style: Style::Light,
                 ..Default::default()
             })
             .unwrap();
         assert!(out.text.ends_with('.'));
         assert!(out.text.starts_with("S"));
+    }
+
+    #[test]
+    fn assertive_style_marks_output() {
+        let llm = FakeLlmCleanup;
+        let out = llm
+            .cleanup(CleanupRequest {
+                raw_text: "ship it",
+                style: Style::Assertive,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(out.text.starts_with("[fmt]"));
     }
 
     #[test]

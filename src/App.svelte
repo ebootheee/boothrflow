@@ -55,17 +55,56 @@
     settings.current.hotkeys.toggle || defaultToggleDictationHotkey,
   );
 
-  const styleOptions: Array<{ value: Style; label: string; icon: IconName }> = [
-    { value: "casual", label: "Casual", icon: "pen" },
-    { value: "formal", label: "Formal", icon: "book" },
-    { value: "very-casual", label: "Very casual", icon: "sparkles" },
-    { value: "excited", label: "Excited", icon: "zap" },
-    { value: "raw", label: "Raw", icon: "audio" },
-    // Captain's Log: Star-Trek-style log entry (computed stardate prefix +
-    // formal 24th-century rewrite). Same code path as the other styles —
-    // just a different prompt branch in the cleanup backend.
-    { value: "captains-log", label: "Captain's Log", icon: "radio" },
+  // The structure-aggressiveness picker — single axis from "leave my
+  // words alone" (Raw) to "fully restructure into a memo" (Assertive).
+  // Replaced the old tone-based picker (casual / formal / very-casual /
+  // excited) in Wave 6. See `docs/waves/wave-6-engine-and-formatting.md`
+  // Phase 0. Captain's Log stays available below as a "fun preset" — it
+  // doesn't fit the structure axis (it's a tone gimmick).
+  const styleOptions: Array<{
+    value: Style;
+    label: string;
+    icon: IconName;
+    detail: string;
+  }> = [
+    {
+      value: "raw",
+      label: "Raw",
+      icon: "audio",
+      detail: "No cleanup. Paste verbatim — useful for code dictation or exact-quote capture.",
+    },
+    {
+      value: "light",
+      label: "Light",
+      icon: "pen",
+      detail:
+        "Grammar + light punctuation; paragraph kept as-is. Best for short utterances and Slack messages.",
+    },
+    {
+      value: "moderate",
+      label: "Moderate",
+      icon: "book",
+      detail:
+        "Light cleanup plus paragraph splits at natural breaks; removes filler words and false starts.",
+    },
+    {
+      value: "assertive",
+      label: "Assertive",
+      icon: "sparkles",
+      detail:
+        "LLM has full freedom: bullets when listing, paragraph breaks, code fences, greeting + sign-off in Mail context.",
+    },
+    {
+      value: "captains-log",
+      label: "Captain's Log",
+      icon: "radio",
+      detail: "Star-Trek-style log entry. Stardate prefix + 24th-century rewrite.",
+    },
   ];
+
+  // Used by the segmented control in the General settings tab. Captain's
+  // Log is shown separately as a "fun preset" below the structure picker.
+  const structureStyleOptions = $derived(styleOptions.filter((o) => o.value !== "captains-log"));
 
   const demoNow = new Date("2026-04-28T15:42:00-06:00").toISOString();
   const demoHistory: HistoryEntry[] = [
@@ -75,7 +114,7 @@
       raw: "okay wow that was pretty impressive let's see if I speak a little faster",
       formatted:
         "Okay wow, that was pretty impressive. Let's see if I speak a little faster, if this still lands cleanly. The cleanup pass kept my tone, tightened the sentence breaks, and pasted it without making me babysit the output.",
-      style: "casual",
+      style: "light",
       app_exe: "Notepad.exe",
       window_title: "Notes",
       duration_ms: 7854,
@@ -88,7 +127,7 @@
       raw: "add connor sophie and max to the dictionary",
       formatted:
         "Add Connor, Sophie, and Max to the dictionary so their names stop getting corrected.",
-      style: "formal",
+      style: "moderate",
       app_exe: "Code.exe",
       window_title: "boothrflow",
       duration_ms: 811,
@@ -100,7 +139,7 @@
       captured_at: new Date("2026-04-27T17:22:00-06:00").toISOString(),
       raw: "make this paragraph tighter then paste it into the active document",
       formatted: "Make this paragraph tighter, then paste it into the active document.",
-      style: "casual",
+      style: "light",
       app_exe: null,
       window_title: null,
       duration_ms: 704,
@@ -916,20 +955,47 @@
                     <span class="step-icon"><Icon name="pen" size={14} /></span>
                     <div>
                       <span class="section-kicker">Style</span>
-                      <h3>Default style</h3>
+                      <h3>Default cleanup style</h3>
                     </div>
                   </div>
-                  <label class="settings-field">
-                    <span>Style</span>
-                    <select
-                      value={settings.style}
-                      onchange={(event) => selectStyle(event.currentTarget.value as Style)}
+                  <p class="settings-help">
+                    How aggressively the LLM may restructure your raw transcript. Pick the level
+                    that matches what you usually dictate — Light for short messages, Assertive for
+                    long brain dumps you want organized.
+                  </p>
+                  <div class="style-segmented" role="radiogroup" aria-label="Cleanup style level">
+                    {#each structureStyleOptions as option (option.value)}
+                      <button
+                        type="button"
+                        class="style-segment"
+                        class:active={settings.style === option.value}
+                        role="radio"
+                        aria-checked={settings.style === option.value}
+                        onclick={() => selectStyle(option.value)}
+                      >
+                        <Icon name={option.icon} size={13} />
+                        <span class="style-segment-label">{option.label}</span>
+                      </button>
+                    {/each}
+                  </div>
+                  <p class="settings-help">
+                    {styleOptions.find((o) => o.value === settings.style)?.detail ?? ""}
+                  </p>
+                  <details class="fun-presets">
+                    <summary>Fun presets</summary>
+                    <button
+                      type="button"
+                      class="style-segment"
+                      class:active={settings.style === "captains-log"}
+                      onclick={() => selectStyle("captains-log")}
                     >
-                      {#each styleOptions as option (option.value)}
-                        <option value={option.value}>{option.label}</option>
-                      {/each}
-                    </select>
-                  </label>
+                      <Icon name="radio" size={13} />
+                      <span class="style-segment-label">Captain's Log</span>
+                    </button>
+                    <p class="settings-help">
+                      Star-Trek-style log entry. Stardate prefix + 24th-century rewrite.
+                    </p>
+                  </details>
                   <label class="toggle-row">
                     <input
                       type="checkbox"

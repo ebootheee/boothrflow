@@ -298,10 +298,45 @@ export type SettingsPatch = {
 	auto_learn_corrections?: boolean | null,
 };
 
-export type Style = "raw" | "formal" | "casual" | "excited" | "very-casual" | 
+/**
+ *  Cleanup style — picks how aggressively the LLM may restructure the raw
+ *  transcript. The axis is **structuring aggressiveness**, not tone:
+ *  users empirically don't switch tones, but they do switch between
+ *  "leave my words alone" and "organize this brain dump for me." See
+ *  `docs/waves/wave-6-engine-and-formatting.md` Phase 0.
+ * 
+ *  The legacy tone-based variants (Casual, Formal, VeryCasual, Excited)
+ *  auto-migrate via serde aliases — old persisted settings deserialize
+ *  straight into the new variants on read. On the next save, the new
+ *  canonical names land in the JSON so the alias path is one-time.
+ */
+export type Style = 
+// No cleanup, paste verbatim. Code dictation, exact-quote capture.
+"raw" | 
+/**
+ *  Grammar + light punctuation; paragraph kept as-is. The "what
+ *  we've been doing" baseline. Maps from the legacy Casual / VeryCasual
+ *  / Excited tone variants — those were noise relative to structure.
+ */
+"light" | 
+/**
+ *  Light cleanup *plus* paragraph splits at natural breaks; removes
+ *  filler ("um," "you know," repeated false starts). Formal users
+ *  land here because their preference reads as "more cleaned up,"
+ *  not "different tone."
+ */
+"moderate" | 
+/**
+ *  LLM has full freedom to restructure: bullets when listing,
+ *  paragraph breaks at sentence-boundary pauses, code fences for
+ *  "in code" cues, greeting + signature when focused app is Mail.
+ *  Long brain dumps come back as memos. New variant — no alias.
+ */
+"assertive" | 
 /**
  *  Star-Trek-style log entry. Computed stardate prefix + formal
- *  24th-century rewrite. See ROADMAP § Phase 2 / Style presets.
+ *  24th-century rewrite. Orthogonal to the structure axis — kept
+ *  as a fun preset.
  */
 "captains-log";
 

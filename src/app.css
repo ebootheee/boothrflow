@@ -742,6 +742,85 @@ kbd {
   color: var(--brand);
 }
 
+/* Structure-aggressiveness segmented control. Visual reinforcement of
+   the "level" mental model — equal-width buttons in a row, active one
+   in brand color. Captain's Log lives below in a `.fun-presets`
+   disclosure since it's orthogonal to the structure axis. */
+.style-segmented {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  padding: 3px;
+}
+
+button.style-segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 720;
+  padding: 6px 8px;
+}
+
+button.style-segment:hover {
+  background: var(--muted);
+}
+
+button.style-segment.active {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.style-segment-label {
+  white-space: nowrap;
+}
+
+details.fun-presets {
+  margin-top: 4px;
+}
+
+details.fun-presets summary {
+  cursor: pointer;
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0;
+  line-height: 1.1;
+  text-transform: uppercase;
+  list-style: none;
+  padding: 4px 0;
+}
+
+details.fun-presets summary::-webkit-details-marker {
+  display: none;
+}
+
+details.fun-presets summary::before {
+  content: "▸ ";
+  display: inline-block;
+  margin-right: 2px;
+  transition: transform 0.15s ease;
+}
+
+details.fun-presets[open] summary::before {
+  transform: rotate(90deg);
+}
+
+details.fun-presets button.style-segment {
+  border: 1px solid var(--line);
+  background: #fff;
+  margin-top: 4px;
+}
+
 .settings-result {
   display: inline-flex;
   align-items: center;
