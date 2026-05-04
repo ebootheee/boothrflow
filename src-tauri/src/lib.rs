@@ -15,13 +15,19 @@
 //! (no whisper.cpp / llama.cpp compile).
 
 pub mod audio;
+#[cfg(feature = "real-engines")]
+pub mod bench;
+#[cfg(feature = "real-engines")]
+pub mod captures;
 pub mod commands;
 pub mod context;
 pub mod error;
 pub mod history;
 pub mod hotkey;
 pub mod injector;
+pub mod learning;
 pub mod llm;
+pub mod ocr;
 pub mod overlay;
 pub mod pipeline;
 pub mod quickpaste;
@@ -32,9 +38,10 @@ pub mod tray;
 pub mod vad;
 
 use commands::{
-    app_version, dictate_once, llm_test_connection, microphone_available, open_macos_setting,
-    reveal_path, set_dictation_style, settings_export, settings_get, settings_import,
-    settings_options, settings_update, whisper_download_model, whisper_model_name,
+    app_version, dev_mode_enabled, dictate_once, llm_test_connection, microphone_available,
+    open_macos_setting, request_screen_recording_permission, reveal_path,
+    screen_recording_available, set_dictation_style, settings_export, settings_get,
+    settings_import, settings_options, settings_update, whisper_download_model, whisper_model_name,
 };
 use tauri::Manager;
 use tauri::WindowEvent;
@@ -42,8 +49,9 @@ use tauri_specta::{collect_commands, Builder as SpectaBuilder};
 
 #[cfg(feature = "real-engines")]
 use commands::{
-    history_clear, history_delete, history_paste, history_recent, history_search, history_stats,
-    quickpaste_close, quickpaste_paste,
+    bench_list, bench_load, bench_save, bench_wav_path, history_clear, history_delete,
+    history_paste, history_recent, history_search, history_stats, quickpaste_close,
+    quickpaste_paste,
 };
 #[cfg(feature = "real-engines")]
 use std::sync::Arc;
@@ -68,6 +76,8 @@ pub fn build_specta() -> SpectaBuilder<tauri::Wry> {
         quickpaste_close,
         open_macos_setting,
         microphone_available,
+        screen_recording_available,
+        request_screen_recording_permission,
         whisper_model_name,
         settings_get,
         settings_update,
@@ -78,6 +88,11 @@ pub fn build_specta() -> SpectaBuilder<tauri::Wry> {
         llm_test_connection,
         app_version,
         reveal_path,
+        bench_list,
+        bench_load,
+        bench_save,
+        bench_wav_path,
+        dev_mode_enabled,
     ])
 }
 
@@ -88,6 +103,8 @@ pub fn build_specta() -> SpectaBuilder<tauri::Wry> {
         set_dictation_style,
         open_macos_setting,
         microphone_available,
+        screen_recording_available,
+        request_screen_recording_permission,
         whisper_model_name,
         settings_get,
         settings_update,
@@ -98,6 +115,7 @@ pub fn build_specta() -> SpectaBuilder<tauri::Wry> {
         llm_test_connection,
         app_version,
         reveal_path,
+        dev_mode_enabled,
     ])
 }
 
@@ -224,7 +242,7 @@ pub fn run() {
             // Real-engines: spawn the hotkey daemon and bridge events to
             // Tauri's event system + the pill overlay + history.
             #[cfg(feature = "real-engines")]
-            session::spawn_session_daemon(handle, history);
+            session::spawn_session_daemon(handle, history, settings_store);
 
             Ok(())
         })

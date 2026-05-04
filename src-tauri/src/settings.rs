@@ -83,6 +83,25 @@ pub struct AppStyleOverride {
     pub style: Style,
 }
 
+/// Wrong → right substitution recorded by the user (manually edited in
+/// Settings) or by the post-paste learning coordinator (auto-derived
+/// from edits the user makes after a paste). The cleanup prompt
+/// honors these as authoritative spellings.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq, Hash)]
+pub struct MisheardReplacement {
+    pub wrong: String,
+    pub right: String,
+}
+
+impl MisheardReplacement {
+    pub fn new(wrong: impl Into<String>, right: impl Into<String>) -> Self {
+        Self {
+            wrong: wrong.into().trim().to_string(),
+            right: right.into().trim().to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
 pub struct AppSettings {
     pub schema_version: u16,
@@ -94,6 +113,25 @@ pub struct AppSettings {
     pub hotkeys: HotkeySettings,
     pub vocabulary: String,
     pub per_app_styles: Vec<AppStyleOverride>,
+    /// Wrong → right substitutions injected into the cleanup prompt's
+    /// `<USER-CORRECTIONS>` block. Auto-populated by the post-paste
+    /// learning coordinator (Wave 5); manually editable in Settings.
+    #[serde(default)]
+    pub commonly_misheard: Vec<MisheardReplacement>,
+    /// Pull the focused window's OCR contents into the cleanup prompt
+    /// as supporting context (Wave 5). Off by default; opt-in. Honors
+    /// `privacy_mode` — when privacy is on, OCR is skipped regardless
+    /// of this flag.
+    #[serde(default)]
+    pub cleanup_window_ocr: bool,
+    /// Watch the focused field after a paste; if the user makes a
+    /// small single-word edit (Levenshtein ≤ 3), append the
+    /// `(original, edited)` pair to `commonly_misheard` so the cleanup
+    /// prompt's `<USER-CORRECTIONS>` block applies it next time. Off
+    /// by default — auto-edits a settings field, which is the kind
+    /// of thing that needs explicit consent.
+    #[serde(default)]
+    pub auto_learn_corrections: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]
@@ -115,6 +153,12 @@ pub struct SettingsPatch {
     pub vocabulary: Option<String>,
     #[specta(optional)]
     pub per_app_styles: Option<Vec<AppStyleOverride>>,
+    #[specta(optional)]
+    pub commonly_misheard: Option<Vec<MisheardReplacement>>,
+    #[specta(optional)]
+    pub cleanup_window_ocr: Option<bool>,
+    #[specta(optional)]
+    pub auto_learn_corrections: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -183,6 +227,9 @@ impl Default for AppSettings {
             hotkeys: HotkeySettings::default(),
             vocabulary: std::env::var("BOOTHRFLOW_WHISPER_PROMPT").unwrap_or_default(),
             per_app_styles: Vec::new(),
+            commonly_misheard: Vec::new(),
+            cleanup_window_ocr: false,
+            auto_learn_corrections: false,
         }
     }
 }
@@ -228,6 +275,10 @@ impl SettingsStore {
             hotkeys: self.get_or("hotkeys", fallback.hotkeys)?,
             vocabulary: self.get_or("vocabulary", fallback.vocabulary)?,
             per_app_styles: self.get_or("per_app_styles", fallback.per_app_styles)?,
+            commonly_misheard: self.get_or("commonly_misheard", fallback.commonly_misheard)?,
+            cleanup_window_ocr: self.get_or("cleanup_window_ocr", fallback.cleanup_window_ocr)?,
+            auto_learn_corrections: self
+                .get_or("auto_learn_corrections", fallback.auto_learn_corrections)?,
         };
         // Prefer the OS keychain over whatever's in the settings JSON.
         // Keys land in JSON only as a legacy migration path or when the
@@ -274,6 +325,15 @@ impl SettingsStore {
         }
         if let Some(per_app_styles) = patch.per_app_styles {
             settings.per_app_styles = per_app_styles;
+        }
+        if let Some(commonly_misheard) = patch.commonly_misheard {
+            settings.commonly_misheard = commonly_misheard;
+        }
+        if let Some(cleanup_window_ocr) = patch.cleanup_window_ocr {
+            settings.cleanup_window_ocr = cleanup_window_ocr;
+        }
+        if let Some(auto_learn_corrections) = patch.auto_learn_corrections {
+            settings.auto_learn_corrections = auto_learn_corrections;
         }
 
         validate_settings(&settings)?;
@@ -332,6 +392,9 @@ impl SettingsStore {
         self.set("hotkeys", &settings.hotkeys)?;
         self.set("vocabulary", &settings.vocabulary)?;
         self.set("per_app_styles", &settings.per_app_styles)?;
+        self.set("commonly_misheard", &settings.commonly_misheard)?;
+        self.set("cleanup_window_ocr", settings.cleanup_window_ocr)?;
+        self.set("auto_learn_corrections", settings.auto_learn_corrections)?;
         self.store
             .save()
             .map_err(|e| BoothError::internal(format!("settings save: {e}")))?;
@@ -450,52 +513,53 @@ pub fn whisper_models() -> Vec<WhisperModel> {
             value: "tiny.en",
             file: "ggml-tiny.en.bin",
             available: true,
-            label: "Whisper tiny.en (39M, 75MB)",
-            detail: "Fastest, lowest accuracy.",
+            label: "Whisper tiny.en — live preview (39M, 75MB)",
+            detail: "Live transcript appears as you talk. Fastest, lowest accuracy of the Whisper variants.",
             download_arg: "tiny",
         },
         WhisperModel {
             value: "base.en",
             file: "ggml-base.en.bin",
             available: true,
-            label: "Whisper base.en (74M, 142MB)",
-            detail: "Still quick, noticeably cleaner than tiny.",
+            label: "Whisper base.en — live preview (74M, 142MB)",
+            detail: "Live transcript appears as you talk. Quick, noticeably cleaner than tiny.",
             download_arg: "base",
         },
         WhisperModel {
             value: "small.en",
             file: "ggml-small.en.bin",
             available: true,
-            label: "Whisper small.en (244M, 466MB)",
-            detail: "Recommended quality/speed balance.",
+            label: "Whisper small.en — live preview (244M, 466MB)",
+            detail: "Live transcript appears as you talk. Recommended Whisper balance of quality and speed.",
             download_arg: "small",
         },
         WhisperModel {
             value: "medium.en",
             file: "ggml-medium.en.bin",
             available: true,
-            label: "Whisper medium.en (769M, 1.5GB)",
-            detail: "Better accuracy, higher latency.",
+            label: "Whisper medium.en — live preview (769M, 1.5GB)",
+            detail: "Live transcript appears as you talk. Better accuracy, higher latency.",
             download_arg: "medium",
         },
         WhisperModel {
             value: "large-v3-turbo",
             file: "ggml-large-v3-turbo.bin",
             available: true,
-            label: "Whisper large-v3-turbo (809M, 1.6GB)",
-            detail: "Best local quality option for strong Macs.",
+            label: "Whisper large-v3-turbo — live preview (809M, 1.6GB)",
+            detail: "Live transcript appears as you talk. Highest-quality Whisper variant; best for M-series Macs.",
             download_arg: "large-v3-turbo",
         },
-        // NVIDIA Parakeet TDT 0.6B v3 — listed as a roadmap signal so the
-        // user can see the upcoming engine pivot. Disabled in the picker
-        // until the sherpa-onnx integration in Wave 5+ wires the actual
-        // inference path. See ADR-009.
+        // NVIDIA Parakeet TDT 0.6B — offline-only by design. The currently-
+        // published v2-int8 sherpa-onnx bundle doesn't ship a streaming
+        // export, so the pill stays empty during PTT and the final
+        // transcript appears on release. See `docs/waves/
+        // wave-5-context-aware-cleanup.md` for the streaming follow-up.
         WhisperModel {
             value: "parakeet-tdt-0.6b-v3",
-            file: "parakeet-tdt-0.6b-v3.onnx",
-            available: false,
-            label: "NVIDIA Parakeet TDT 0.6B v3 (coming soon — Wave 5+)",
-            detail: "Faster + more accurate than Whisper, native streaming. Wired via sherpa-onnx in a later wave.",
+            file: "parakeet-tdt-0.6b-v3",
+            available: cfg!(feature = "parakeet-engine"),
+            label: "NVIDIA Parakeet TDT 0.6B — final transcript only (preview)",
+            detail: "Highest accuracy on technical jargon (Qwen, OpenAI, file paths, etc). No live preview while talking — transcript appears on release. English only.",
             download_arg: "parakeet",
         },
     ]
@@ -645,6 +709,22 @@ fn migrate(mut settings: AppSettings) -> AppSettings {
         settings.schema_version = CURRENT_SCHEMA_VERSION;
     }
     settings.whisper.model = normalize_whisper_model(&settings.whisper.model);
+
+    // Wave 5e: the legacy quick-paste default `Option + Cmd + H` collides
+    // with macOS's system-wide `Cmd + H` "hide app" shortcut. AppKit
+    // intercepts before our rdev listener sees the keypress, hiding
+    // boothrflow instead of opening the palette. Migrate users still on
+    // the legacy default to the new safe default. Users who explicitly
+    // chose a different chord are untouched — only the literal old
+    // default strings are rewritten.
+    let legacy_quickpaste = ["Option + Cmd + H", "Alt + Win + H"];
+    if legacy_quickpaste
+        .iter()
+        .any(|legacy| *legacy == settings.hotkeys.quick_paste)
+    {
+        settings.hotkeys.quick_paste = default_quick_paste_hotkey();
+    }
+
     settings
 }
 
@@ -660,6 +740,18 @@ fn default_store_entries() -> Result<HashMap<String, JsonValue>> {
     entries.insert("hotkeys".into(), json(defaults.hotkeys)?);
     entries.insert("vocabulary".into(), json(defaults.vocabulary)?);
     entries.insert("per_app_styles".into(), json(defaults.per_app_styles)?);
+    entries.insert(
+        "commonly_misheard".into(),
+        json(defaults.commonly_misheard)?,
+    );
+    entries.insert(
+        "cleanup_window_ocr".into(),
+        json(defaults.cleanup_window_ocr)?,
+    );
+    entries.insert(
+        "auto_learn_corrections".into(),
+        json(defaults.auto_learn_corrections)?,
+    );
     Ok(entries)
 }
 
@@ -668,9 +760,22 @@ fn json<T: Serialize>(value: T) -> Result<JsonValue> {
 }
 
 fn default_whisper_model() -> String {
-    std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE")
-        .map(|file| normalize_whisper_model(&file))
-        .unwrap_or_else(|_| "tiny.en".into())
+    if let Ok(file) = std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE") {
+        return normalize_whisper_model(&file);
+    }
+    // Production builds enable `parakeet-engine` and ship the Parakeet
+    // TDT 0.6B model — best transcription quality on our benchmarks
+    // (named entities, semantic stability) at the cost of higher first-token
+    // latency. Inner-loop dev builds (no parakeet-engine) fall back to
+    // tiny.en so the dev loop stays light.
+    #[cfg(feature = "parakeet-engine")]
+    {
+        "parakeet-tdt-0.6b-v3".into()
+    }
+    #[cfg(not(feature = "parakeet-engine"))]
+    {
+        "tiny.en".into()
+    }
 }
 
 fn default_ptt_hotkey() -> String {
@@ -690,10 +795,18 @@ fn default_toggle_hotkey() -> String {
 }
 
 fn default_quick_paste_hotkey() -> String {
+    // Avoid `Cmd + H` on macOS — that's the system-wide "Hide app"
+    // shortcut, intercepted by AppKit before our rdev listener can
+    // see the H keypress. With `Option + Cmd + H`, if the listener
+    // ever loses track of the Option modifier (synthetic event flows,
+    // some accessibility software, fast-tap timing) the OS falls
+    // back to plain `Cmd + H` and hides boothrflow instead of
+    // opening the palette. `Ctrl + Option + H` keeps the H mnemonic
+    // without overlapping any AppKit shortcut.
     if cfg!(target_os = "macos") {
-        "Option + Cmd + H".into()
+        "Ctrl + Option + H".into()
     } else {
-        "Alt + Win + H".into()
+        "Ctrl + Alt + H".into()
     }
 }
 
@@ -752,6 +865,24 @@ mod tests {
             ..HotkeySettings::default()
         };
         validate_hotkey_bindings(&hotkeys).unwrap();
+    }
+
+    #[test]
+    fn migrate_rewrites_legacy_quickpaste_default() {
+        let mut settings = AppSettings::default();
+        settings.hotkeys.quick_paste = "Option + Cmd + H".into();
+        let migrated = migrate(settings);
+        assert_eq!(migrated.hotkeys.quick_paste, default_quick_paste_hotkey());
+        assert_ne!(migrated.hotkeys.quick_paste, "Option + Cmd + H");
+    }
+
+    #[test]
+    fn migrate_preserves_user_chosen_quickpaste_hotkey() {
+        let custom = "Ctrl + Shift + V".to_string();
+        let mut settings = AppSettings::default();
+        settings.hotkeys.quick_paste = custom.clone();
+        let migrated = migrate(settings);
+        assert_eq!(migrated.hotkeys.quick_paste, custom);
     }
 
     #[test]

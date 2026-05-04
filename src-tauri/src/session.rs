@@ -35,14 +35,58 @@ mod real {
     use std::sync::Arc;
 
     use crate::audio::{AudioFrame, AudioSource, CpalAudioSource};
+    use crate::context::{ContextDetector, RealContextDetector};
     use crate::history::{HistoryStore, RecordRequest};
     use crate::hotkey::{HotkeyEvent, HotkeySource, RdevHotkeySource};
     use crate::injector::{ClipboardInjector, Injector};
+    use crate::learning::{FocusedTextReader, LearningCoordinator, PasteSnapshot};
     use crate::llm::{should_skip_llm, CleanupRequest, LlmCleanup, OpenAiCompatLlmCleanup};
     use crate::overlay;
-    use crate::settings;
+    use crate::settings::{self, SettingsStore};
     use crate::stt::{StreamingTranscriber, SttEngine, SttResult, WhisperSttEngine};
     use crate::tray;
+
+    /// STT engine selected at runtime. Wave 5c added Parakeet alongside
+    /// the existing Whisper path; the variant determines which
+    /// `transcribe()` impl runs and whether the streaming partial
+    /// pipeline can be wired (whisper-only today — Parakeet streaming
+    /// is a Wave 5d enhancement against `stt::streaming::LocalAgreement2`).
+    enum LoadedStt {
+        Whisper(WhisperSttEngine),
+        #[cfg(feature = "parakeet-engine")]
+        Parakeet(crate::stt::ParakeetSttEngine),
+    }
+
+    impl LoadedStt {
+        fn transcribe(&self, audio: &[f32]) -> crate::error::Result<SttResult> {
+            match self {
+                Self::Whisper(e) => e.transcribe(audio),
+                #[cfg(feature = "parakeet-engine")]
+                Self::Parakeet(e) => e.transcribe(audio),
+            }
+        }
+
+        /// Whisper-typed handle, for streaming partials. Returns `None`
+        /// when Parakeet (or any future non-streaming engine) is the
+        /// active variant — the session loop interprets that as
+        /// "no partials this dictation".
+        fn as_whisper(&self) -> Option<&WhisperSttEngine> {
+            match self {
+                Self::Whisper(e) => Some(e),
+                #[cfg(feature = "parakeet-engine")]
+                Self::Parakeet(_) => None,
+            }
+        }
+
+        /// Engine identifier for diagnostics + the captures sidecar.
+        fn name(&self) -> &str {
+            match self {
+                Self::Whisper(e) => e.name(),
+                #[cfg(feature = "parakeet-engine")]
+                Self::Parakeet(e) => e.name(),
+            }
+        }
+    }
 
     #[derive(Debug, Clone, Serialize)]
     struct DictationFormatted {
@@ -97,18 +141,26 @@ mod real {
         );
     }
 
-    pub fn spawn_session_daemon(app: AppHandle, history: Option<Arc<HistoryStore>>) {
+    pub fn spawn_session_daemon(
+        app: AppHandle,
+        history: Option<Arc<HistoryStore>>,
+        settings_store: SettingsStore,
+    ) {
         thread::Builder::new()
             .name("boothrflow-session".into())
             .spawn(move || {
-                if let Err(e) = run(app, history) {
+                if let Err(e) = run(app, history, settings_store) {
                     tracing::error!("session daemon errored: {e}");
                 }
             })
             .ok();
     }
 
-    fn run(app: AppHandle, history: Option<Arc<HistoryStore>>) -> crate::error::Result<()> {
+    fn run(
+        app: AppHandle,
+        history: Option<Arc<HistoryStore>>,
+        settings_store: SettingsStore,
+    ) -> crate::error::Result<()> {
         let hotkey = RdevHotkeySource::new();
         let hotkey_rx = hotkey.start()?;
         tracing::info!(
@@ -117,10 +169,14 @@ mod real {
         );
 
         let audio = CpalAudioSource::new();
+        let context_detector = RealContextDetector::new();
+        let learning = build_learning_coordinator(settings_store.clone());
 
-        // Whisper is hot-swappable from Settings. Load once at startup, then
-        // reload on the next press if the configured model file changes.
-        let mut stt: Option<WhisperSttEngine> = None;
+        // STT engine is hot-swappable from Settings. Load once at startup,
+        // then reload on the next press if the configured model file
+        // changes. Variant (Whisper vs. Parakeet) is determined per-load
+        // based on the current `whisper_model` setting value.
+        let mut stt: Option<LoadedStt> = None;
         let mut stt_model_file: Option<String> = None;
         ensure_stt_loaded(&app, &mut stt, &mut stt_model_file);
 
@@ -192,20 +248,26 @@ mod real {
                     // produces the same transcript on release.
                     ensure_stt_loaded(&app, &mut stt, &mut stt_model_file);
 
+                    // Streaming partials are whisper-only today —
+                    // `as_whisper()` returns `None` when Parakeet is
+                    // active, which the loop interprets as
+                    // "no partials this dictation".
                     let streaming =
-                        stt.as_ref().and_then(|engine| {
-                            match StreamingTranscriber::spawn(
-                                engine.shared_context(),
-                                engine.initial_prompt().map(|s| s.to_string()),
-                                dictation_started,
-                            ) {
-                                Ok(s) => Some(s),
-                                Err(e) => {
-                                    tracing::warn!("streaming disabled: {e}");
-                                    None
+                        stt.as_ref()
+                            .and_then(LoadedStt::as_whisper)
+                            .and_then(|engine| {
+                                match StreamingTranscriber::spawn(
+                                    engine.shared_context(),
+                                    engine.initial_prompt().map(|s| s.to_string()),
+                                    dictation_started,
+                                ) {
+                                    Ok(s) => Some(s),
+                                    Err(e) => {
+                                        tracing::warn!("streaming disabled: {e}");
+                                        None
+                                    }
                                 }
-                            }
-                        });
+                            });
 
                     let mut frames: Vec<AudioFrame> = Vec::new();
                     let mut released = false;
@@ -278,6 +340,8 @@ mod real {
                                 engine,
                                 injector.as_ref(),
                                 history.as_deref(),
+                                &context_detector,
+                                learning.as_ref(),
                                 dictation_started,
                                 capture_ms,
                                 &pcm,
@@ -306,7 +370,7 @@ mod real {
 
     fn ensure_stt_loaded(
         app: &AppHandle,
-        stt: &mut Option<WhisperSttEngine>,
+        stt: &mut Option<LoadedStt>,
         loaded_model_file: &mut Option<String>,
     ) {
         let model_file = settings::current_whisper_model_file();
@@ -317,15 +381,51 @@ mod real {
         *stt = None;
         *loaded_model_file = None;
 
-        let path = match crate::stt::default_models_dir() {
-            Some(dir) => dir.join(&model_file),
+        let models_dir = match crate::stt::default_models_dir() {
+            Some(dir) => dir,
             None => {
                 let msg = "could not resolve user data directory";
-                tracing::warn!("whisper not available: {msg}");
+                tracing::warn!("stt not available: {msg}");
                 let _ = app.emit("dictation:model-missing", msg);
                 return;
             }
         };
+
+        // Parakeet vs. Whisper: the current settings value carries the
+        // model identifier, not a flag. We dispatch by name. The
+        // settings option for Parakeet is gated on the
+        // `parakeet-engine` cargo feature, so we only see the
+        // identifier here when the engine is actually compiled in.
+        let model_value = settings::current_app_settings().whisper.model;
+
+        if model_value == "parakeet-tdt-0.6b-v3" {
+            #[cfg(feature = "parakeet-engine")]
+            {
+                let dir = models_dir.join(&model_file);
+                match crate::stt::ParakeetSttEngine::from_model_dir(&dir) {
+                    Ok(engine) => {
+                        tracing::info!("parakeet: loaded from {}", dir.display());
+                        *stt = Some(LoadedStt::Parakeet(engine));
+                        *loaded_model_file = Some(model_file);
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("parakeet not available: {e}");
+                        let _ = app.emit("dictation:model-missing", e.to_string());
+                        return;
+                    }
+                }
+            }
+            #[cfg(not(feature = "parakeet-engine"))]
+            {
+                let msg = "Parakeet selected but binary built without `parakeet-engine` feature";
+                tracing::warn!("{msg}");
+                let _ = app.emit("dictation:model-missing", msg);
+                return;
+            }
+        }
+
+        let path = models_dir.join(&model_file);
         let name = std::path::Path::new(&model_file)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -335,7 +435,7 @@ mod real {
         match WhisperSttEngine::from_path(&path, name) {
             Ok(engine) => {
                 tracing::info!("whisper: model loaded ({model_file})");
-                *stt = Some(engine);
+                *stt = Some(LoadedStt::Whisper(engine));
                 *loaded_model_file = Some(model_file);
             }
             Err(e) => {
@@ -369,11 +469,18 @@ mod real {
             .ok();
     }
 
+    // Pulling these into a struct doesn't buy clarity — every collaborator
+    // is conceptually independent (engine, injector, history, context,
+    // learning), and the function is the single coordination point for
+    // the post-STT path. Suppress the lint locally.
+    #[allow(clippy::too_many_arguments)]
     fn transcribe_and_emit(
         app: &AppHandle,
-        engine: &WhisperSttEngine,
+        engine: &LoadedStt,
         injector: Option<&ClipboardInjector>,
         history: Option<&HistoryStore>,
+        context_detector: &dyn ContextDetector,
+        learning: Option<&LearningCoordinator>,
         dictation_started: Instant,
         capture_ms: u64,
         pcm: &[f32],
@@ -412,11 +519,32 @@ mod real {
             return;
         }
 
+        // Capture the focused-app context once (cheap on Mac/Win — a few
+        // syscalls). The result feeds both the cleanup prompt's app-aware
+        // hints and the history record (so per-app filtering / counts in
+        // the UI work without re-walking the OS later).
+        let app_context = context_detector.detect();
+        if let Some(ctx) = &app_context {
+            tracing::debug!("context: app={} window={:?}", ctx.app_exe, ctx.window_title);
+        }
+
+        // Window OCR: opt-in via Settings + skipped when privacy mode is
+        // on. Wave 5 ships the structure; the actual Vision-framework
+        // call lives in `crate::ocr` and is gated by the Screen Recording
+        // TCC permission. None on platforms without an OCR backend.
+        let window_ocr = if !settings::privacy_mode_enabled()
+            && settings::current_app_settings().cleanup_window_ocr
+        {
+            crate::ocr::capture_focused_window_text(app_context.as_ref()).ok()
+        } else {
+            None
+        };
+
         // Optional LLM cleanup pass. Skip for short / opted-out cases; fall
         // back to raw transcript on any LLM failure.
         emit_stage(app, "cleaning", dictation_started);
         let style = settings::current_style();
-        let cleanup = run_llm_cleanup(&stt_result.text, style);
+        let cleanup = run_llm_cleanup(&stt_result.text, style, app_context.clone(), window_ocr);
         if let Some(err) = cleanup.error {
             // Surface so the UI can show "Cleanup unavailable — using raw"
             // instead of silently displaying 0 ms.
@@ -437,15 +565,70 @@ mod real {
             );
         }
 
+        // Optional benchmark capture — gated on `BOOTHRFLOW_DEV` env var
+        // (the umbrella developer-mode flag). Saves the audio buffer + a JSON sidecar with the raw
+        // transcript, cleaned text, and timing breakdown to the user data
+        // dir's `captures/` directory. See `captures.rs` for the layout.
+        // Skipped under privacy mode for the same reason cleanup is skipped.
+        if crate::captures::enabled() && !settings::privacy_mode_enabled() {
+            let captured_at = chrono::Utc::now().to_rfc3339();
+            let audio_seconds = pcm.len() as f32 / 16_000.0;
+            let style_label = format!("{style:?}").to_lowercase();
+            let app_exe_ref = app_context.as_ref().map(|c| c.app_exe.as_str());
+            let window_title_ref = app_context.as_ref().and_then(|c| c.window_title.as_deref());
+            let meta = crate::captures::CaptureMetadata {
+                captured_at,
+                engine: engine.name(),
+                style: &style_label,
+                app_exe: app_exe_ref,
+                window_title: window_title_ref,
+                audio_samples: pcm.len(),
+                audio_seconds,
+                raw: &stt_result.text,
+                formatted: &formatted,
+                ground_truth: "",
+                stt_ms,
+                llm_ms,
+                llm_prompt_tokens: cleanup.prompt_tokens,
+                llm_completion_tokens: cleanup.completion_tokens,
+            };
+            if let Err(e) = crate::captures::save(pcm, meta) {
+                tracing::warn!("captures: save failed (continuing): {e}");
+            }
+        }
+
         emit_stage(app, "pasting", dictation_started);
         let paste_started = Instant::now();
+        let mut paste_succeeded = false;
         if let Some(inj) = injector {
-            if let Err(e) = inj.inject(&formatted) {
-                tracing::error!("inject failed: {e}");
-                let _ = app.emit("dictation:error", e.to_string());
+            match inj.inject(&formatted) {
+                Ok(()) => {
+                    paste_succeeded = true;
+                }
+                Err(e) => {
+                    tracing::error!("inject failed: {e}");
+                    let _ = app.emit("dictation:error", e.to_string());
+                }
             }
         }
         let paste_ms = paste_started.elapsed().as_millis() as u64;
+
+        // Post-paste learning observation: if the user enables auto-learn,
+        // a background thread samples the focused field after a short
+        // settling window and looks for a small single-word edit. The
+        // coordinator no-ops when auto-learn is off, so the gate is here
+        // (settings load + opt-in check) rather than inside the spawn.
+        if paste_succeeded
+            && !formatted.is_empty()
+            && !settings::privacy_mode_enabled()
+            && settings::current_app_settings().auto_learn_corrections
+        {
+            if let Some(coord) = learning {
+                coord.observe(PasteSnapshot {
+                    pasted_text: formatted.clone(),
+                });
+            }
+        }
 
         // Persist to history. Embedding fires-and-forgets in a background
         // thread inside record(); this call returns in <1ms after the SQL
@@ -455,8 +638,8 @@ mod real {
                 raw: stt_result.text.clone(),
                 formatted: formatted.clone(),
                 style,
-                app_exe: None, // populated when W5 wires context detection
-                window_title: None,
+                app_exe: app_context.as_ref().map(|c| c.app_exe.clone()),
+                window_title: app_context.as_ref().and_then(|c| c.window_title.clone()),
                 duration_ms: capture_ms,
                 llm_ms,
             };
@@ -512,7 +695,12 @@ mod real {
         }
     }
 
-    fn run_llm_cleanup(raw: &str, style: settings::Style) -> CleanupOutcome {
+    fn run_llm_cleanup(
+        raw: &str,
+        style: settings::Style,
+        app_context: Option<crate::context::AppContext>,
+        window_ocr: Option<String>,
+    ) -> CleanupOutcome {
         // Hard skips: explicit raw style, no LLM loaded, very short utterance.
         if matches!(style, settings::Style::Raw) || settings::privacy_mode_enabled() {
             return CleanupOutcome::passthrough(raw);
@@ -533,10 +721,19 @@ mod real {
             return CleanupOutcome::passthrough(raw);
         }
 
+        // Wave 5: pull the user's vocab + corrections out of settings and
+        // hand them to the cleanup prompt. The prompt builder emits
+        // <USER-CORRECTIONS> + <OCR-RULES> blocks ghost-pepper-style.
+        let preferred = parse_vocabulary(&settings.vocabulary);
+        let commonly_misheard = settings.commonly_misheard.clone();
+
         match llm.cleanup(CleanupRequest {
             raw_text: raw,
             style,
-            app_context: None,
+            app_context,
+            window_ocr,
+            preferred_transcriptions: preferred,
+            commonly_misheard,
         }) {
             Ok(out) => {
                 let tok_per_sec = out.tokens_per_second();
@@ -569,6 +766,46 @@ mod real {
 
     fn emit_result(app: &AppHandle, result: &SttResult) {
         let _ = app.emit("dictation:result", result);
+    }
+
+    /// Build the platform-appropriate learning coordinator, or `None` on
+    /// platforms without an accessibility reader. The coordinator is
+    /// always constructed when the platform supports it — the gating on
+    /// `auto_learn_corrections` happens per-paste, so flipping the
+    /// settings toggle takes effect immediately.
+    fn build_learning_coordinator(settings_store: SettingsStore) -> Option<LearningCoordinator> {
+        let reader: Arc<dyn FocusedTextReader> = build_focused_text_reader()?;
+        Some(LearningCoordinator::new(reader, Arc::new(settings_store)))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn build_focused_text_reader() -> Option<Arc<dyn FocusedTextReader>> {
+        Some(Arc::new(crate::learning::MacosFocusedTextReader::new()))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn build_focused_text_reader() -> Option<Arc<dyn FocusedTextReader>> {
+        // Windows: TODO(wave-5b) — UIAutomation reader.
+        // Linux: AT-SPI bridge, deferred.
+        None
+    }
+
+    /// Parse the user's free-text vocabulary setting into a normalized
+    /// list of distinct terms. Splits on commas / newlines, trims, drops
+    /// blanks, dedupes (case-sensitive — proper-noun casing matters).
+    fn parse_vocabulary(text: &str) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for raw in text.split([',', '\n', ';']) {
+            let term = raw.trim();
+            if term.is_empty() {
+                continue;
+            }
+            if seen.insert(term.to_string()) {
+                out.push(term.to_string());
+            }
+        }
+        out
     }
 
     fn summarize(frames: &[AudioFrame], elapsed: Duration) -> DictationSummary {

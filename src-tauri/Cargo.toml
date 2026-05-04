@@ -31,6 +31,21 @@ required-features = ["real-engines"]
 [[example]]
 name = "export_bindings"
 
+# Probe that loads the Parakeet model and runs a synthetic decode.
+# Lets us validate sherpa-onnx version compatibility with the
+# downloaded model bundle without firing up the full Tauri runtime.
+[[example]]
+name = "parakeet_probe"
+required-features = ["real-engines", "parakeet-engine"]
+
+# Replays every captured wav through every available STT/LLM/style
+# config and writes a `<stem>.variants.json` next to each wav. Pair
+# with the grading UI (Wave 7 candidate) to score variants instead
+# of typing verbatim ground truth.
+[[example]]
+name = "bench_replay"
+required-features = ["real-engines"]
+
 # ──────────────────────────────────────────────────────────────────────────
 # Features
 #
@@ -63,6 +78,10 @@ real-engines = [
   "dep:rusqlite_migration",
   "dep:chrono",
 ]
+# Off by default — pulls a sizable C++ sherpa-onnx binary download +
+# the ONNX runtime. Opt in with `--features parakeet-engine` once the
+# user has run `pnpm download:model:mac parakeet`.
+parakeet-engine = ["dep:sherpa-rs", "dep:sherpa-rs-sys"]
 win32-headed = []
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -170,6 +189,20 @@ voice_activity_detector = { version = "0.2", optional = true }
 whisper-rs = { version = "0.16", optional = true }
 dirs = { version = "5", optional = true }
 
+# STT (Wave 5c) — Parakeet TDT 0.6B v3 via sherpa-onnx. Off by default;
+# opted in via `parakeet-engine` feature so a baseline build doesn't
+# download the ~150MB sherpa-onnx prebuilt + ONNX runtime archive.
+# `download-binaries` skips the cmake build by fetching a prebuilt
+# binary; gracefully falls back to source build when the prebuilt
+# isn't available for the target.
+sherpa-rs = { version = "=0.6.8", optional = true, default-features = false, features = ["download-binaries"] }
+# Pin sherpa-rs-sys to match sherpa-rs's expected layout. sherpa-rs
+# declares a caret-version on sherpa-rs-sys "0.6.5" which resolves
+# up to 0.6.8 (which added a `hr` field that 0.6.5's wrapper code
+# doesn't initialize). Forcing the exact patch keeps the wrapper
+# matched to the sys struct shape.
+sherpa-rs-sys = { version = "=0.6.8", optional = true, default-features = false, features = ["download-binaries"] }
+
 # LLM (P2 W4) — out-of-process via OpenAI-compatible HTTP API.
 # In-process llama-cpp-2 was attempted but conflicts with whisper-rs-sys:
 # both statically link different ggml versions (LNK2005). The HTTP path
@@ -212,6 +245,44 @@ objc2-app-kit = { version = "0.3", features = [
   "NSRunningApplication",
   "NSWorkspace",
   "libc",
+] }
+
+# Accessibility API for the post-paste learning coordinator. Reads the
+# focused text field's value via AXUIElement / kAXValueAttribute. Same
+# permission scope as the existing `enigo` paste injection (already
+# granted), so no additional TCC prompt.
+accessibility = "0.2"
+accessibility-sys = "0.2"
+core-foundation = "0.10"
+
+# Vision framework for the focused-window OCR cleanup-context feature.
+# Uses CGDisplayCreateImage (deprecated as of macOS 14.4 but still
+# functional) for the screen capture, then VNRecognizeTextRequest for
+# the OCR pass. Requires Screen Recording TCC at runtime; capture
+# returns None on permission denial and the cleanup proceeds without
+# the OCR block. Wave 5d should pivot to ScreenCaptureKit before the
+# deprecated APIs are removed in a future macOS major.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+  "NSArray",
+  "NSDictionary",
+  "NSError",
+  "NSString",
+  "NSValue",
+] }
+objc2-core-graphics = { version = "0.3", features = [
+  "CGImage",
+  "CGDirectDisplay",
+  "CGGeometry",
+  "CGWindow",
+] }
+objc2-vision = { version = "0.3", features = [
+  "VNRequest",
+  "VNRecognizeTextRequest",
+  "VNObservation",
+  "VNRequestHandler",
+  "VNTypes",
+  "objc2-core-graphics",
 ] }
 
 # Auto-enable Whisper Metal backend on Apple Silicon. The base whisper-rs

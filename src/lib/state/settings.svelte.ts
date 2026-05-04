@@ -52,51 +52,57 @@ const defaultSettings: AppSettings = {
   },
   vocabulary: "",
   per_app_styles: [],
+  commonly_misheard: [],
+  cleanup_window_ocr: false,
+  auto_learn_corrections: false,
 };
 
 const defaultOptions: SettingsOptions = {
   whisper_models: [
     {
       value: "tiny.en",
-      label: "Whisper tiny.en (39M, 75MB)",
-      detail: "Fastest, lowest accuracy.",
+      label: "Whisper tiny.en — live preview (39M, 75MB)",
+      detail:
+        "Live transcript appears as you talk. Fastest, lowest accuracy of the Whisper variants.",
       file: "ggml-tiny.en.bin",
       available: true,
     },
     {
       value: "base.en",
-      label: "Whisper base.en (74M, 142MB)",
-      detail: "Still quick, noticeably cleaner than tiny.",
+      label: "Whisper base.en — live preview (74M, 142MB)",
+      detail: "Live transcript appears as you talk. Quick, noticeably cleaner than tiny.",
       file: "ggml-base.en.bin",
       available: true,
     },
     {
       value: "small.en",
-      label: "Whisper small.en (244M, 466MB)",
-      detail: "Recommended quality/speed balance.",
+      label: "Whisper small.en — live preview (244M, 466MB)",
+      detail:
+        "Live transcript appears as you talk. Recommended Whisper balance of quality and speed.",
       file: "ggml-small.en.bin",
       available: true,
     },
     {
       value: "medium.en",
-      label: "Whisper medium.en (769M, 1.5GB)",
-      detail: "Better accuracy, higher latency.",
+      label: "Whisper medium.en — live preview (769M, 1.5GB)",
+      detail: "Live transcript appears as you talk. Better accuracy, higher latency.",
       file: "ggml-medium.en.bin",
       available: true,
     },
     {
       value: "large-v3-turbo",
-      label: "Whisper large-v3-turbo (809M, 1.6GB)",
-      detail: "Best local quality option for strong Macs.",
+      label: "Whisper large-v3-turbo — live preview (809M, 1.6GB)",
+      detail:
+        "Live transcript appears as you talk. Highest-quality Whisper variant; best for M-series Macs.",
       file: "ggml-large-v3-turbo.bin",
       available: true,
     },
     {
       value: "parakeet-tdt-0.6b-v3",
-      label: "NVIDIA Parakeet TDT 0.6B v3 (coming soon — Wave 5+)",
+      label: "NVIDIA Parakeet TDT 0.6B — final transcript only (preview)",
       detail:
-        "Faster + more accurate than Whisper, native streaming. Wired via sherpa-onnx in a later wave.",
-      file: "parakeet-tdt-0.6b-v3.onnx",
+        "Highest accuracy on technical jargon (Qwen, OpenAI, file paths, etc). No live preview while talking — transcript appears on release. English only.",
+      file: "parakeet-tdt-0.6b-v3",
       available: false,
     },
   ],
@@ -142,6 +148,9 @@ function applyPatch(current: AppSettings, patch: SettingsPatch): AppSettings {
     hotkeys: patch.hotkeys ?? current.hotkeys,
     vocabulary: patch.vocabulary ?? current.vocabulary,
     per_app_styles: patch.per_app_styles ?? current.per_app_styles,
+    commonly_misheard: patch.commonly_misheard ?? current.commonly_misheard ?? [],
+    cleanup_window_ocr: patch.cleanup_window_ocr ?? current.cleanup_window_ocr ?? false,
+    auto_learn_corrections: patch.auto_learn_corrections ?? current.auto_learn_corrections ?? false,
   };
 }
 
@@ -241,6 +250,21 @@ function createSettings() {
     return invoke("llm_test_connection");
   }
 
+  /// Trigger the macOS Screen Recording permission prompt and return
+  /// whether access is currently granted. No-op on non-macOS. Also
+  /// has the side-effect of registering the app in System Settings →
+  /// Privacy & Security → Screen Recording (without this call, the
+  /// app doesn't appear in that list at all).
+  async function requestScreenRecordingPermission(): Promise<boolean> {
+    if (!isTauri()) return true;
+    const { invoke } = await import("@tauri-apps/api/core");
+    try {
+      return await invoke<boolean>("request_screen_recording_permission");
+    } catch {
+      return false;
+    }
+  }
+
   async function getAppVersion(): Promise<string> {
     if (!isTauri()) return "0.0.0-web";
     const { invoke } = await import("@tauri-apps/api/core");
@@ -324,6 +348,7 @@ function createSettings() {
     exportJson,
     importJson,
     testLlmConnection,
+    requestScreenRecordingPermission,
     getAppVersion,
     revealPath,
     getAutostartEnabled,

@@ -10,7 +10,20 @@ export function isTauri(): boolean {
 }
 
 export function isMacPlatform(): boolean {
-  return typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+  // `navigator.platform` is deprecated in modern WebKit and may
+  // return an empty string in some Tauri WKWebView contexts. Fall
+  // back to `userAgent`, which reliably contains "Macintosh" on
+  // every Mac browser engine. Also accept the modern userAgentData
+  // when present.
+  if (typeof navigator === "undefined") return false;
+  const platform = navigator.platform ?? "";
+  if (/Mac|iPhone|iPad|iPod/.test(platform)) return true;
+  const ua = navigator.userAgent ?? "";
+  if (/Macintosh|Mac OS X/i.test(ua)) return true;
+  type UserAgentData = { platform?: string };
+  const uaData = (navigator as unknown as { userAgentData?: UserAgentData }).userAgentData;
+  if (uaData?.platform && /macOS|Mac/.test(uaData.platform)) return true;
+  return false;
 }
 
 export function dictationHotkeyLabel(): string {

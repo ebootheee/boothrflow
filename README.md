@@ -8,7 +8,7 @@ An open-source replacement for [Wispr Flow](https://wisprflow.ai/), built around
 2. **Tiny footprint.** Tauri 2 + Rust. Target: ~30MB installer, ~80MB RAM idle.
 3. **Persistent, searchable memory.** Every dictation goes into a local SQLite store with both lexical and semantic search _(landing in Phase 3)_.
 
-**Status:** pre-alpha. Hot path (mic → Whisper STT → LLM cleanup → paste) works on Windows and macOS, with persistent history, quick-paste palette, and an in-app Settings panel. Context-aware cleanup (OCR window context + auto-learning correction store) is next. See [`ROADMAP.md`](./ROADMAP.md).
+**Status:** pre-alpha. Hot path (mic → Whisper / Parakeet STT → LLM cleanup → paste) works on Windows and macOS, with persistent history, quick-paste palette, and an in-app Settings panel. Wave 5 (context-aware cleanup: app-context, focused-window OCR, auto-learning correction store, Parakeet TDT 0.6B engine) is in UAT on [`feat/wave-5`](https://github.com/ebootheee/boothrflow/tree/feat/wave-5). **Next: Wave 6 — production polish** (code signing, auto-update, onboarding wizard, beta/stable channels). Detailed plan at [`docs/waves/wave-6-production-polish.md`](./docs/waves/wave-6-production-polish.md). After Wave 6 the project moves to a staging → stable release cadence — see [`ROADMAP.md`](./ROADMAP.md).
 
 ## Try it (macOS)
 
@@ -52,27 +52,34 @@ cargo build --manifest-path src-tauri/Cargo.toml --features "real-engines gpu-me
 
 ### macOS permissions
 
-The app needs three macOS privileges. The topbar has a **Permissions**
-panel with one-click links to each System Settings pane:
+Settings → General → Permissions has one-click links to each pane:
 
 - **Microphone** — required for audio capture (`cpal`).
-- **Accessibility** — required for paste injection (`enigo`).
+- **Accessibility** — required for paste injection (`enigo`) and
+  the Wave 5 auto-learn coordinator's focused-field read.
 - **Input Monitoring** — required for the global hotkey (`rdev` /
   `CGEventTap`) to fire when boothrflow isn't focused.
+- **Screen Recording** _(optional, Wave 5)_ — only needed when the
+  "focused-window OCR cleanup context" toggle is on. Requested
+  eagerly via `CGRequestScreenCaptureAccess()` at the moment the
+  toggle is flipped, so the OS prompt fires from a clear UX moment.
 
-In dev mode (`pnpm dev`), macOS attributes the prompts to the parent
-terminal — after granting, **quit and relaunch the terminal** so the
-new permissions are inherited. Production bundles ship with the
-matching `Info.plist` usage strings and prompt against the boothrflow
-app itself, so notarized installs don't need the relaunch dance.
+In dev mode (`pnpm dev` / `pnpm dev:parakeet`), macOS attributes the
+prompts to the parent terminal — after granting, **quit and relaunch
+the terminal** so the new permissions are inherited. Production
+bundles ship with the matching `Info.plist` usage strings and prompt
+against the boothrflow app itself, so notarized installs don't need
+the relaunch dance.
 
 **Hold to dictate**: hold `Ctrl + Cmd`, speak into TextEdit, release. Text pastes.
 
 **Tap to toggle (hands-free)**: tap `Ctrl + Option + Space` to start a
-hands-free dictation session, tap again to stop. Useful for dictations
-longer than you'd want to hold a key.
+hands-free dictation session, tap again to stop.
 
-Open quick-paste with `Option + Cmd + H`.
+Open quick-paste with `Ctrl + Option + H`. _(The legacy default
+`Option + Cmd + H` migrated automatically — `Cmd + H` is the
+system-wide "Hide app" shortcut and macOS intercepts it before our
+hotkey listener can see it.)_
 
 ## Try it (Windows, ~5 min setup)
 
@@ -109,31 +116,35 @@ hands-free dictation session, tap again to stop.
 
 ## Status
 
-| Area                                                                                                                                                 | Status                               |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| Plan + 15 ADRs                                                                                                                                       | Done                                 |
-| Scaffold + green test suite                                                                                                                          | Done — 47 Rust + 7 FE tests passing  |
-| **P1 W1**: audio + hotkey + pill                                                                                                                     | Done                                 |
-| **P1 W2**: VAD + Whisper STT                                                                                                                         | Done — needs ggml-tiny.en.bin        |
-| **P1 W3**: paste injection + tray                                                                                                                    | Done                                 |
-| **P2 W4**: LLM cleanup (OpenAI-compat HTTP) + style picker                                                                                           | Done — needs Ollama or compat server |
-| **Wave 3**: macOS port                                                                                                                               | Done                                 |
-| **Wave 4a**: cleanup quality + tok/s + streaming roll + Captain's Log                                                                                | Done                                 |
-| Memory / history                                                                                                                                     | Done                                 |
-| **LLM default**: Qwen 2.5 7B (1.5B fallback via env var or Settings)                                                                                 | Done — needs `pnpm ollama:pull`      |
-| **Wave 4B**: in-app Settings panel                                                                                                                   | Done                                 |
-| **Wave 4b polish**: Keychain, sidebar nav, presets, Test connection, autostart, About, Permissions-in-Settings, equal-width grid, Specta TS bindings | Done                                 |
-| **Wave 5**: OCR window context + auto-learning corrections + Parakeet STT engine                                                                     | Next                                 |
-| **P2 W5**: app-context detection                                                                                                                     | Roadmapped                           |
-| **Phase 2 backlog**: structured/app-aware formatting                                                                                                 | Roadmapped (see ROADMAP.md)          |
-| Linux                                                                                                                                                | Phase 4                              |
+| Area                                                                                                                                                 | Status                                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plan + 15 ADRs                                                                                                                                       | Done                                                                                                                                                                |
+| Scaffold + green test suite                                                                                                                          | Done — 47 Rust + 7 FE tests passing                                                                                                                                 |
+| **P1 W1**: audio + hotkey + pill                                                                                                                     | Done                                                                                                                                                                |
+| **P1 W2**: VAD + Whisper STT                                                                                                                         | Done — needs ggml-tiny.en.bin                                                                                                                                       |
+| **P1 W3**: paste injection + tray                                                                                                                    | Done                                                                                                                                                                |
+| **P2 W4**: LLM cleanup (OpenAI-compat HTTP) + style picker                                                                                           | Done — needs Ollama or compat server                                                                                                                                |
+| **Wave 3**: macOS port                                                                                                                               | Done                                                                                                                                                                |
+| **Wave 4a**: cleanup quality + tok/s + streaming roll + Captain's Log                                                                                | Done                                                                                                                                                                |
+| Memory / history                                                                                                                                     | Done                                                                                                                                                                |
+| **LLM default**: Qwen 2.5 7B (1.5B fallback via env var or Settings)                                                                                 | Done — needs `pnpm ollama:pull`                                                                                                                                     |
+| **Wave 4B**: in-app Settings panel                                                                                                                   | Done                                                                                                                                                                |
+| **Wave 4b polish**: Keychain, sidebar nav, presets, Test connection, autostart, About, Permissions-in-Settings, equal-width grid, Specta TS bindings | Done                                                                                                                                                                |
+| **Wave 5**: context-aware cleanup (app-context, OCR, correction store, auto-learn) + Parakeet TDT 0.6B engine                                        | In UAT on [`feat/wave-5`](https://github.com/ebootheee/boothrflow/tree/feat/wave-5) — checklist at [`docs/uat/wave-5-checklist.md`](./docs/uat/wave-5-checklist.md) |
+| **Wave 6**: production polish — code signing, auto-update, onboarding wizard, beta/stable channels                                                   | Next — detailed plan at [`docs/waves/wave-6-production-polish.md`](./docs/waves/wave-6-production-polish.md) (6 phases, 6-9 days)                                   |
+| **Wave 7**: pick from auto-format style / noise suppression / cleanup quality follow-ups / Wave 5 carry-overs / Parakeet-as-default                  | Queued — see [ROADMAP](./ROADMAP.md#after-wave-6--wave-7-candidates-queued)                                                                                         |
+| Future ideas: Obsidian + custom connectors, hyper-modern UI rebuild, meeting mode, **iOS mobile companion (E2E + on-device local)**, plugin API      | Captured — see [ROADMAP](./ROADMAP.md#future-ideas-post-wave-7)                                                                                                     |
+| **Wave 5d (carry-over)**: Windows UIA focused-field read, Windows OCR, Parakeet streaming partials, ScreenCaptureKit pivot                           | Tracked in [`docs/waves/wave-5-context-aware-cleanup.md`](./docs/waves/wave-5-context-aware-cleanup.md)                                                             |
+| Linux port                                                                                                                                           | Phase 4                                                                                                                                                             |
 
 ## Documentation
 
 - [`ROADMAP.md`](./ROADMAP.md) — what's coming, when
+- [`CHANGELOG.md`](./CHANGELOG.md) — what shipped each session
 - [`PLAN.md`](./PLAN.md) — full engineering plan with feature parity matrix vs Wispr Flow, latency budget, repo layout, risk register
 - [`DECISIONS.md`](./DECISIONS.md) — Architecture Decision Records (15 entries)
 - [`docs/uat/`](./docs/uat/) — phase-by-phase UAT reports, including manual test plans
+- [`docs/waves/`](./docs/waves/) — per-wave design docs and handoff plans
 
 ## Architecture (mental model)
 
@@ -207,7 +218,7 @@ real-engines` work directly — clang and SDK headers are auto-discovered.
 If bindgen cannot find libclang, `brew install llvm` and set
 `LIBCLANG_PATH=$(brew --prefix llvm)/lib`.
 
-macOS uses `Ctrl + Cmd` for hold-to-talk and `Option + Cmd + H` for
+macOS uses `Ctrl + Cmd` for hold-to-talk and `Ctrl + Option + H` for
 quick-paste. If the hotkey or paste does nothing, grant Accessibility
 permission in `System Settings → Privacy & Security → Accessibility`.
 If audio capture fails, grant Microphone permission in the same Privacy

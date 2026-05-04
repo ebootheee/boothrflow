@@ -6,6 +6,7 @@ impl FixedContextDetector {
     pub fn slack() -> Self {
         Self(Some(AppContext {
             app_exe: "slack.exe".into(),
+            app_name: "Slack".into(),
             window_title: Some("general — Acme".into()),
             control_role: Some("Edit".into()),
         }))

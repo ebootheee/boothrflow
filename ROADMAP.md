@@ -2,23 +2,221 @@
 
 > Where we are and where we're going. The detailed engineering plan lives in [`PLAN.md`](./PLAN.md); this is the user-facing summary.
 
-## Current state — Waves 1–3 + Wave 4a + Wave 4B landed on `main` (April 2026)
+## Current state — Waves 1–3 + Wave 4a + Wave 4B landed on `main` (April 2026); Wave 5 in UAT on `feat/wave-5` (May 2026)
 
 The core push-to-talk dictation loop works end-to-end on Windows _and_ macOS.
 
 - **Hold to dictate**: `Ctrl + Win` (Windows) or `Ctrl + Cmd` (macOS); release to transcribe + paste.
-- **Tap to toggle (hands-free)**: `Ctrl + Alt + Space` (Windows) or `Ctrl + Option + Space` (macOS); tap once to start, tap again to stop. For dictations longer than you'd want to hold a key.
-- Whisper-tiny-en STT (~75MB local model); **Metal auto-enabled on Apple Silicon** for ~5–15× CPU baseline. Initial-prompt vocabulary covers project-specific proper nouns (Qwen, Wispr, boothrflow, Apple Silicon, etc.) so they don't get rendered phonetically.
-- Local LLM cleanup via Ollama (**qwen2.5:7b** by default, fallback to qwen2.5:1.5b via `BOOTHRFLOW_LLM_MODEL`, OpenAI-compat HTTP). Per-style aggressiveness flag drops disfluencies and self-corrections by default; `Raw` style preserves verbatim. **`tok/s` telemetry** parsed from the Ollama `usage` field shows up in the cleanup chip alongside ms.
-- **Five Style presets** plus the **Captain's Log** easter-egg style — Star-Trek-style log entries with a computed stardate prefix.
-- **Streaming partials with commit-and-roll** — pill keeps updating indefinitely on long dictations (LA2-stable prefix freezes at the 20 s mark, audio buffer trims to a 3 s overlap, suffix-prefix dedup keeps the boundary words clean).
-- Persistent searchable history (SQLite + FTS5 + nomic-embed-text vectors)
-- Quick-paste palette (Alt+Win+H / Option+Cmd+H)
-- **In-app Settings** panel (Wave 4B): Whisper / LLM / embed model pickers with parameter-count labels, hotkey rebind UI, vocabulary editor, privacy toggle, settings export/import. Persists via `tauri-plugin-store`.
-- macOS first-run permissions panel (Microphone / Accessibility / Input Monitoring)
-- 100% local: no audio or transcripts leave your machine
+- **Tap to toggle (hands-free)**: `Ctrl + Alt + Space` (Windows) or `Ctrl + Option + Space` (macOS); tap once to start, tap again to stop.
+- Whisper-tiny-en STT (~75MB local model); **Metal auto-enabled on Apple Silicon** for ~5–15× CPU baseline. Initial-prompt vocabulary covers project-specific proper nouns so they don't get rendered phonetically.
+- Local LLM cleanup via Ollama (**qwen2.5:7b** by default, fallback to qwen2.5:1.5b via env var or Settings, OpenAI-compat HTTP). Per-style aggressiveness flag drops disfluencies and self-corrections by default; `Raw` style preserves verbatim. **`tok/s` telemetry** in the cleanup chip alongside ms.
+- **Five Style presets** plus the **Captain's Log** easter-egg style.
+- **Streaming partials with commit-and-roll** — pill keeps updating indefinitely on long dictations (LA2-stable prefix freezes at the 20 s mark, audio buffer trims to a 3 s overlap, suffix-prefix dedup keeps boundary words clean).
+- Persistent searchable history (SQLite + FTS5 + nomic-embed-text vectors).
+- Quick-paste palette (`Ctrl+Alt+H` / `Ctrl+Option+H` post Wave 5e migration; legacy default `Alt+Win+H` / `Option+Cmd+H` migrated automatically).
+- **In-app Settings** (Wave 4B): Whisper / LLM / embed model pickers with parameter-count labels, hotkey rebind UI, vocabulary editor, privacy toggle, settings export/import. Persists via `tauri-plugin-store`.
+- macOS first-run permissions panel (Microphone / Accessibility / Input Monitoring + Screen Recording in Wave 5).
+- 100% local: no audio or transcripts leave your machine.
 
-**What's missing:** `tauri-specta` full TS-binding generation (the remaining Wave 4b polish item, deferred for its own session), structured/app-aware formatting, OCR window context, auto-learning correction store, Linux port, code-signing + notarization, onboarding wizard. See below.
+**Wave 5 (in UAT on `feat/wave-5`, six commits 022876f → f1b4aaa):**
+
+- **App-context detection** (`NSWorkspace::frontmostApplication` / `GetForegroundWindow`) → cleanup prompt's `<APP-CONTEXT>` block.
+- **Common mishearings editor** + `<USER-CORRECTIONS>` prompt block.
+- **Auto-learn correction coordinator** — post-paste settling window, macOS AX read of focused field, single-word edit detection, FIFO-capped at 50 entries.
+- **Focused-window OCR** for cleanup context (macOS Vision via `CGDisplayCreateImage` + `VNRecognizeTextRequest`). Eager Screen-Recording permission prompt at toggle time.
+- **OCR prompt-injection sanitizer** — neutralizes `<` / `>` so OCR'd text can't close `<WINDOW-OCR-CONTENT>` and inject fake instructions.
+- **Parakeet TDT 0.6B engine** behind the `parakeet-engine` Cargo feature, via sherpa-rs 0.6.8. Auto-runs a metadata-propagation script during model download. Probe transcribes the bundle's test wav at ~470ms.
+- **Prompt prefix caching** via Ollama `keep_alive: 5m` extra (heuristic-gated to port 11434 only so LM Studio / llama-server users don't get unknown-field rejections).
+- **Privacy mode expansion** — now suppresses OCR + app context propagation + auto-learn in addition to the existing LLM-cleanup gate.
+
+UAT checklist: [`docs/uat/wave-5-checklist.md`](./docs/uat/wave-5-checklist.md). Detail + handoff items: [`docs/waves/wave-5-context-aware-cleanup.md`](./docs/waves/wave-5-context-aware-cleanup.md).
+
+**Wave 5 carry-overs (deferred from `feat/wave-5`):**
+
+- Windows UIAutomation focused-field reader (mirror of macOS AX path).
+- Windows OCR via `windows::Media::Ocr::OcrEngine`.
+- Parakeet streaming partials integration with `LocalAgreement2` (currently no live partials when Parakeet is the active engine).
+- ScreenCaptureKit pivot — `CGDisplayCreateImage` is deprecated as of macOS 14.4; works through 15.x but should move to `SCContentFilter` + `SCStream` before it actually disappears.
+
+---
+
+## Wave 6 — Production polish (next, locked in)
+
+**Plan:** [`docs/waves/wave-6-production-polish.md`](./docs/waves/wave-6-production-polish.md). Six phases, 6-9 focused days total, each independently shippable.
+
+**Goal:** turn boothrflow from "works on Eric's laptop in dev mode" into "anyone can download a signed installer, get prompted by the real app for permissions, and stay current via auto-update." Without this, every dev-mode TCC permission is owned by the parent terminal, the app doesn't appear correctly in System Settings → Privacy & Security panes, and there's no way to give the build to anyone (multi-hour clone-and-compile onboarding).
+
+**Phases:**
+
+1. **Release infrastructure** — `VERSION` file, GitHub Actions matrix build (macOS-arm64, macOS-x64, Windows-x64), `RELEASING.md` playbook, CHANGELOG → release-notes mapping.
+2. **macOS code signing + notarization** — Developer ID + `notarytool`. Replaces the dev-mode TCC dance with proper app attribution.
+3. **Auto-update** — `tauri-plugin-updater` + GitHub Releases as the manifest server. Paired with Phase 2 because **unsigned auto-update is broken UX** — every update re-triggers Gatekeeper's "Open Anyway" dance. Sign first, auto-update second; the loop is real after Phase 3 lands. Phases 1+2+3 together = working release loop on macOS.
+4. **Windows code signing** — Azure Trusted Signing (cheap path) or EV cert. Quiets SmartScreen for the `.msi`. Can lag by a release if onboarding drags.
+5. **Onboarding wizard** — first-launch flow walking through privacy callout, mic permission, accessibility/input-monitoring/screen-recording permissions, model download (with progress), hotkey config, LLM endpoint check.
+6. **Beta → Stable channels** — two release manifests (`latest-beta.json` / `latest.json`); promotion script; cadence rules in `RELEASING.md`.
+
+**After Wave 6:** every subsequent feature follows a **staging → stable** cadence. Feature branch → local UAT → beta tag → 3-7 day soak on Eric's daily driver → promote to stable. Hot-fix path goes direct to stable.
+
+---
+
+## After Wave 6 — Wave 7 candidates (queued)
+
+Pick one (or stack low-cost ones). All deferred during Wave 6 production polish.
+
+### Performance baseline + benchmark harness `[low]` (recommended first pick)
+
+Before chasing any new STT engine (Parakeet v3, Nemotron Speech Streaming, Multitalker Parakeet — see Future Ideas) we need real numbers on the current stack. Right now we have anecdotes ("Parakeet feels more accurate on jargon," "Whisper streaming is nice"). Anecdotes don't tell us whether a swap is worth shipping.
+
+**Deliverables:**
+
+- Vendored test-wav set in `testdata/benchmark/`: ~10-20 short clips covering casual speech, technical jargon (model names, file paths, code), proper nouns, fast speech, slow speech, ambient noise. Use LibriSpeech-style ground truth for WER computation; Eric can record a few personal-speech clips for the casual/jargon mix.
+- `cargo run --example bench` binary that loops the test set through each (engine × LLM-config × style) combination and emits a CSV: `engine, model, llm, style, audio_seconds, stt_ms, llm_ms, paste_ms, wer_pct, output`.
+- Markdown report generator that turns the CSV into a comparison table with deltas vs the previous run.
+- `docs/benchmarks/baseline-YYYY-MM-DD.md` per run, committed for trend tracking.
+
+Without this, "is engine X actually better?" stays a vibes call.
+
+### Auto-format style `[medium]`
+
+Wispr Flow's killer differentiator. Long dictations come back as actual structure (bullets when you spoke a list, paragraph breaks at sentence-boundary pauses, code fences when you said "in code", greeting + signature in Mail). Surfaces as a sixth Style ("Auto-format") that overrides tone-only styles when app-context confidence is high. Wave 5's app-context detection landed the prerequisite.
+
+### Audio noise suppression `[low–medium]`
+
+RNNoise (Rust binding via `nnnoiseless`, ~85KB model) or DeepFilterNet 3 (upgrade path) as an optional pre-VAD stage in `audio/cpal_source.rs`. Pairs with Silero VAD already there: cleaner input → tighter endpointing. Toggle in Settings, default off.
+
+### Cleanup quality follow-ups `[low]` (stack-friendly)
+
+- **Skip-LLM hotkey** — explicit "raw mode" for code dictation. One new hotkey row in Settings.
+- **Spelled-out word detection** — pre-cleanup pass scans for `B-O-O-T-H-E` / `b o o t h e` / NATO phonetic / "spelled" cue phrases. Emits an authoritative-spelling marker the LLM is told to honor.
+- **OCR length-based gate** — skip OCR when raw_text > 500 chars (OCR's marginal value drops as spoken text gets longer).
+
+### Wave 5 carry-overs `[low–medium]`
+
+- Windows UIAutomation focused-field reader.
+- Windows OCR via `windows::Media::Ocr::OcrEngine`.
+- Parakeet streaming partials integration with `LocalAgreement2`.
+- ScreenCaptureKit pivot from the deprecated `CGDisplayCreateImage`.
+
+### Parakeet → default engine `[low]` (gated on benchmark numbers)
+
+Once the performance baseline (above) confirms Parakeet beats Whisper on accuracy + latency on M-series, flip the Rust default in `default_whisper_model()` and bundle Parakeet in the production installer. Whisper stays as the multilingual fallback. Naturally rides on Wave 6 — first stable release that ships with Parakeet built-in.
+
+### Multilingual Whisper variants `[low]`
+
+Currently we ship the `.en` Whisper variants only (English-only, slightly more accurate on English than the multilingual same-size models). Add the multilingual rows (`tiny`, `base`, `small`, `medium`, `large-v3-turbo` without the `.en` suffix) to the picker so non-English users have an option without switching to BYOK. ~25 lines + a download-script alias each.
+
+### Parakeet 1.1B English variant `[low]` (gated on benchmark numbers)
+
+NVIDIA's larger Parakeet variant — same architecture as the 0.6B v2 we ship, ~2× memory, ~1.5-2× latency, but cleaner output on technical jargon. Worth offering as a third Parakeet row for power users with M-series Pro/Max chips. One-line bundle URL change in the download script + a row in `whisper_models()` once the sherpa-onnx ONNX export is published.
+
+---
+
+## Future ideas (post-Wave-7)
+
+Things that have come up and are worth queuing — not committed, just captured so they don't get lost.
+
+### STT engine evaluations (NVIDIA model family)
+
+All gated on the benchmark harness (Wave 7) producing real numbers first — we've been burned enough times by "feels faster" claims that didn't survive measurement. NVIDIA's NeMo team has been shipping ASR models at a fast clip; this is the menu of candidates worth measuring against our current Whisper + Parakeet v2 baseline.
+
+- **Parakeet TDT 0.6B v3 (multilingual).** Same architecture as the v2 we ship, but trained on 25 EU languages with automatic language detection. Direct upgrade once sherpa-onnx publishes its ONNX export. We could re-export from NeMo's checkpoint ourselves with sherpa-onnx's tooling (~1-2 days of model work) instead of waiting. Unblocks multilingual dictation without forcing users to switch to BYOK cloud.
+- **Nemotron Speech Streaming.** Cache-aware streaming ASR with **native punctuation + capitalization** at 80ms-1120ms configurable chunk sizes. Most strategic option of the bunch — if it delivers low-latency streaming AND high accuracy AND already-punctuated output, it could replace Whisper as the streaming engine AND skip the LLM cleanup pass for many cases. Need to verify sherpa-onnx supports it; if not, ONNX Runtime + custom wrapper. Would consolidate the "Whisper streams + LLM punctuates" pipeline into a single model.
+- **Multitalker Parakeet.** Streaming multi-speaker ASR with speaker kernel injection (no enrollment audio required). Natural fit for the meeting transcription mode below — collapses STT + diarization into one model. Better latency and accuracy than the chained pyannote-onnx pipeline that meeting mode currently assumes.
+- **Parakeet Realtime EOU.** 120M-param streaming ASR with built-in end-of-utterance detection at 80-160ms latency. Could replace Silero VAD as our endpoint detector — EOU is a stronger signal than "is the user speaking right now" because it knows when an utterance is _complete_. Tightens tap-to-toggle hands-free mode (auto-stop on real utterance end vs configurable silence timeout).
+- **Canary multilingual translation.** Simultaneous translation + transcription across 25 languages via NVIDIA's Granary dataset. Different feature class — not a replacement for our current STT but the engine behind a "Translate to English" / "Translate to Spanish" Style preset. Speak French, paste English. Niche but cool for multilingual users.
+- **Parakeet 1.1B English** has graduated to the Wave 7 candidate menu above (smaller scope, same architecture as 0.6B).
+
+### Connectors — push dictations / embeddings to other tools
+
+The history store already has FTS5 + nomic-embed-text vectors per dictation. Currently the only consumer is in-app search. Surface that data outward via a connector trait:
+
+- **Obsidian vault push.** Configurable directory; each dictation lands as a markdown note with frontmatter (timestamp, app context, style, tags inferred from the cleanup pass). Embeddings ride along as YAML for later semantic search via Obsidian plugins. The auto-format style (Wave 7) is a natural feeder — bullet lists / paragraphs land cleanly.
+- **Custom HTTP webhook.** POST `{raw, formatted, embedding, timestamp, app_context}` to a user-configured URL. Catch-all for anyone wiring boothrflow into a personal automation pipeline.
+- **Slack / Linear / Notion / Gmail / Google Docs** — same trait, per-service auth + payload shape. v0 set is just Slack incoming webhooks + generic HTTP; richer integrations land progressively.
+- **Voice trigger.** Cleanup pass detects routing instructions inline ("push this to Slack", "send to email", "drop into the ops channel") and treats them as a `Connector::SendTo(target, payload)` instead of a paste. The instruction itself is stripped from the body.
+- **History row action.** Each row in the History panel grows a "Push to…" dropdown.
+
+Originally roadmapped under Phase 3 differentiators; promoted to "future idea" because the Obsidian path specifically is high-leverage for Eric's note-taking workflow and worth a focused wave once Wave 6 production polish lands.
+
+### Hyper-modern UI rebuild
+
+Current Settings panel is functional but not what you'd call "sexy." Candidates:
+
+- **Visual language refresh.** Pick a design system (e.g. shadcn/ui port to Svelte 5, or a custom system). Probably leans into the local-first aesthetic — confident typography, low-chrome, motion that feels alive without being annoying.
+- **Pill redesign.** Currently a rectangle with text inside. Could be a single pulsing dot during listening, transcript flowing out as a typewriter trail during cleaning, etc. The pill is the most-visible surface — worth investing in.
+- **Settings → polished onboarding.** After Wave 6 ships the wizard, the Settings UI itself can feel like a continuation of that polish rather than a separate aesthetic.
+- **Liquid glass / blur effects.** macOS-native vibe (Vibrancy, NSVisualEffectView). Tauri has limited support; might need `objc2-app-kit` calls into the WebKit window's contentView.
+- **Keyboard shortcuts everywhere.** Cmd-, opens Settings. Cmd-K opens command palette. Cmd-/ opens history search. Mode-aware focus states.
+
+Probably best as its own wave (Wave 8?) once the feature surface is stable.
+
+### Meeting transcription mode
+
+Continuous-recording meetings produce transcript + summary as markdown automatically. Big enough to be its own product surface (Phase 5 in the original PLAN.md). Briefly:
+
+- Dual-stream capture (mic + system audio) on macOS via ScreenCaptureKit, on Windows via WASAPI loopback.
+- 30-second chunks with 1-second overlap; disk-spilled so memory stays bounded over multi-hour meetings.
+- Speaker diarization post-meeting (pyannote-onnx or sherpa-onnx).
+- Summary via local LLM with a meeting-summary prompt.
+- Meeting markdowns get indexed by the same FTS5 + nomic-embed-text infra as dictations.
+
+Pairs naturally with the Obsidian connector (meetings → notes folder).
+
+### Plugin API
+
+Pre-STT, post-STT, pre-paste hooks. WASM-sandboxed so plugins can't read arbitrary disk / make network calls without explicit permission. Lets users wire custom transformations (e.g. "always replace `lol` with `haha`," "convert numbers to digits in coding contexts") without forking the app.
+
+### Insights dashboard
+
+Words/day, accuracy delta over time, top apps used in, rating trend (depends on the rating tool from Phase 3). Local-only — never leaves the machine.
+
+### Snippets / voice-activated text expanders
+
+"Insert standup" → boothrflow expands to your standup template. Triggered by voice during dictation (rather than typing the trigger string). Adjacent to the connector idea: snippets as a special kind of insert.
+
+### Voice commands in dictation
+
+"press enter", "new line", "delete that", "select all" parsed mid-dictation and translated to keystroke sequences. Different from Command Mode (which is a separate hold-to-speak transformation gesture). Small finite parser.
+
+### Privacy audit doc
+
+Ship `PRIVACY_AUDIT.md` containing the exact prompt to feed an AI assistant to verify all default features are 100% local, plus a checklist with file pointers and pass/fail. Cheap to author, high trust signal — exactly the kind of thing reviewers and HN commenters notice.
+
+### Linux port
+
+X11 + Wayland clipboard injection paths, AppImage / deb / Flatpak packaging. rdev's Wayland coverage is the gating dependency. sherpa-onnx works the same on Linux as macOS / Windows.
+
+### Mobile companion (iOS, capture-and-sync — Path B)
+
+Not a Wispr-on-iOS clone. iOS doesn't allow the "push-to-talk → paste anywhere" magic that desktop boothrflow does (no global hotkeys, no paste-into-any-app, sandboxed app-context). Trying to compete with Wispr's iOS app or AudioPen on their turf is a losing fight against incumbent marketing budgets.
+
+Instead: a **private mobile capture surface** for the same searchable corpus your desktop boothrflow owns. Phone is always with you; desktop is where you process + paste. Two paths into the same house.
+
+**Architecture sketch:**
+
+- **iOS app** (Tauri 2 mobile, sharing the Settings + history UI from desktop). Dictate via hold-to-record button; on-device STT (WhisperKit on the Apple Neural Engine, or sherpa-onnx → Parakeet via ONNX Runtime's CoreML provider); on-device cleanup via Apple Intelligence's `FoundationModels` framework on iOS 18+ (free, no API key) or MLX-hosted Qwen 1.5B Q4 (fits in iPhone 15 Pro+ memory budget). Optional BYOK cloud LLM cleanup for users who prefer cloud quality.
+- **Sync layer** between phone + desktop, **end-to-end encrypted with user-hosted keys** (Signal-style trust model — server can store ciphertext but can't read it; key derivation lives on the user's devices, not on a central service). Three viable transports:
+  - **iCloud Drive** as the dumb blob store — phone writes ciphertext, desktop reads it. Zero infra to run.
+  - **LAN-only sync** when both devices are on the same WiFi (mDNS discovery + libp2p). Most private, no third-party at all.
+  - **Self-hosted relay** (the user runs a Cloudflare Tunnel / Tailscale / etc.) for "public WiFi at a coffee shop" cases. Optional.
+- **No central server boothrflow runs.** Same posture as Obsidian's Sync vs Sync Server — we don't see your data even if we wanted to.
+
+**Two flavors of the mobile app:**
+
+1. **Standard tier** — on-device STT, Apple Intelligence cleanup, sync-to-desktop via iCloud Drive E2E. Fits the existing privacy promise.
+2. **Hardcore privacy tier** — same but: no iCloud, LAN-only sync, MLX-hosted Qwen instead of Apple Intelligence (Apple Intelligence has been audited as on-device but the trust model is "Apple says so" — Qwen via MLX is "you can read the model weights"), Whisper or Parakeet only (no fallback to Apple's SFSpeechRecognizer which routes through Apple servers on older devices). Toggleable in Settings.
+
+**Differentiator:**
+
+Nobody in the dictation space ships E2E-encrypted sync with user-hosted keys. AudioPen / Wispr / Cleft all hold your transcripts on their servers in plaintext. Even the "private" iOS dictation tools are private-from-other-users, not private-from-the-vendor. Signal-style trust ("we literally cannot read your data") is novel for this category.
+
+**Pairs naturally with:**
+
+- **Obsidian connector** (Future ideas above) — phone dictation → encrypted sync → desktop history → Obsidian vault. One unified note corpus.
+- **Meeting transcription mode** (Future ideas above) — phone records the meeting, desktop processes + indexes it.
+- **Privacy audit doc** (Future ideas above) — the iOS path needs its own audit chapter; the LAN-only / no-cloud variant is genuinely auditable.
+
+**Realistic scope:** ~6-8 weeks of focused work for the standard tier; +2-3 weeks for the hardcore-privacy tier. App Store review, Apple Developer enrollment cost overlap with Wave 6's macOS code-signing work. Not a near-term wave — sit in Future Ideas until desktop is shipped + the connector story is proven.
 
 ### Cross-platform status (post Wave 3 polish)
 
@@ -72,8 +270,8 @@ Goal: feels like Wispr Flow.
 
   - **Connect feedback ratings to model selection.** When the rating tool ships (Phase 3), use bad-rated transcripts to flag prompts that consistently underperform; auto-suggest model upgrades when accuracy drops below a threshold.
 
-- **OCR the focused window as cleanup context** _(supersedes the previously-listed "context-aware reflection" tier — same intuition, stronger evidence: the LLM sees what's on screen rather than guessing from surrounding sentences alone. Pattern from [matthartman/ghost-pepper](https://github.com/matthartman/ghost-pepper))_ — before running cleanup, screenshot the frontmost window, run on-device OCR (macOS: Apple Vision; Windows: Win32 OCR or Tesseract), and feed the recognized text into the cleanup prompt under an `<OCR-RULES>` block: _"Use the window OCR only as supporting context. Prefer the spoken words, but if a spoken word is a recognition miss for a name, command, file, or jargon visible in the OCR, correct it."_ Two-pronged win: (a) proper nouns visible on screen get auto-corrected without the user maintaining a vocab list; (b) the cleanup pass becomes context-aware (replying to a Slack thread? Editing a doc? The model sees what you see). Plumbing: a new `Context/` Rust module mirroring ghost-pepper's `OCRContext` + `FrontmostWindowOCRService` shapes. Permission gate: macOS Screen Recording (in addition to existing Mic/Accessibility/Input Monitoring); Windows is unrestricted. Defer to a Phase 2 sub-feature; entirely optional via Settings toggle, with a privacy callout explaining what's captured (the OCR'd text never leaves the machine — feeds the local LLM and is then dropped).
-- **Auto-learning correction store** _(pattern from ghost-pepper's `PostPasteLearningCoordinator`)_ — passive self-improvement loop. After every paste, poll the focused text field for ~15 s (1 s cadence). When the field stops changing for ~2 s, diff what we pasted against what the user kept. If the diff is a narrow correction (≤2 words), record `MisheardReplacement { wrong: "kwen", right: "Qwen" }` into a `CorrectionStore` SQLite table. Subsequent cleanup prompts include the user's top-N learned corrections as a `<USER-CORRECTIONS>` block: _"Treat these substitutions as authoritative."_ Closes the same loop as the planned spelling-detection feature but without requiring the user to spell anything — they just edit naturally and the system learns. Strictly better than rating-based feedback (passive, no UI friction) and complements it (ratings tell us when the cleanup _approach_ is wrong; this learns the _vocabulary_).
+- ✅ **OCR the focused window as cleanup context** _(shipped in Wave 5 on `feat/wave-5`)._ macOS Vision via `CGDisplayCreateImage` + `VNRecognizeTextRequest`. Permission gate added to the macOS Permissions card (Screen Recording row). Eager `CGRequestScreenCaptureAccess()` on toggle so the OS prompt fires from a clear UX moment rather than mid-dictation. OCR text is sanitized (`<` / `>` neutralized) before landing in the prompt to prevent prompt-injection via on-screen text. Windows OCR (`Media::Ocr::OcrEngine`) deferred to Wave 5d carry-over. ScreenCaptureKit pivot from the deprecated `CGDisplayCreateImage` also tracked in Wave 5d.
+- ✅ **Auto-learning correction store** _(shipped in Wave 5)._ `learning::detect_correction(pasted, current)` heuristic — token-level diff, single-word swaps only, capitalization-only / short / long / multi-word / high-Levenshtein rejects, 50-entry FIFO cap. macOS AX read of the focused text field via `AXUIElementCopyAttributeValue(kAXValueAttribute)` with fallback to `kAXSelectedTextAttribute`. Re-checks the opt-in flag after the 8-second settling window so toggling off mid-window is honored. Privacy mode suppresses both at spawn site and post-sleep. Settings UI exposes both manual editing of `commonly_misheard` and the auto-learn toggle. Windows UIAutomation reader deferred to Wave 5d.
 
   Also exposes two user-editable lists in Settings:
   - `preferredTranscriptions` (newline-separated vocabulary, augments the Whisper `initial_prompt`)
@@ -81,13 +279,13 @@ Goal: feels like Wispr Flow.
 
   Both auto-populate from the learning coordinator and accept manual edits. Direct lift from ghost-pepper's `CorrectionStore` design — proven UX.
 
-- **Prompt prefix caching** _(pattern from ghost-pepper's `CleanupPromptPrefillPlan`)_ — split the cleanup prompt into a static prefix (system instructions + `<USER-CORRECTIONS>` + Style block) and a dynamic suffix (OCR context + the actual transcript). Send the prefix once per Settings change; subsequent dictations only re-encode the dynamic suffix. Ollama supports this via `keep_alive` + reusing context across requests, or via the `/api/generate` endpoint's `context` field. Latency cut for second-and-later dictations within a session — typically saves the entire prompt-eval portion (~150-300 ms on 1.5B Qwen, more on 7B).
+- ✅ **Prompt prefix caching** _(shipped in Wave 5)._ `CleanupPromptInputs` builder orders blocks stable-prefix-first (rules → corrections → app context → OCR last). Ollama `keep_alive: "5m"` extra field keeps weights + KV cache resident across consecutive dictations. Heuristic-gated to port 11434 only — LM Studio (1234) and llama-server (8080) sometimes return 400 on unknown JSON keys, so they skip the field. Cloud BYOK skips it too.
 
 - **Streaming partial continuation past the 25 s cap** _(Wave 3 UAT carry-over)_ — the pill stops updating after ~25 s because `MAX_STREAMING_SAMPLES = 16_000 * 25` and Whisper's 30 s context window starts to drop early audio. Final transcript on release is still complete; only the live display freezes. Approach: a commit-and-roll loop in `streaming.rs`. When the buffer crosses ~20 s and LA2 has a long stable prefix, freeze that prefix into a separate `frozen_text: String` field on `Inner`, trim the buffer to the last ~5 s of audio (overlap), and continue ticking. Worker emits `StreamingPartial { committed: frozen + new_committed, tentative, … }`. Bounded per-tick cost, indefinite session length, minimal boundary-word risk. Same final-pass fallback semantics. ~half-day of work.
 - **Style presets** — Formal, Casual, Excited, Very Casual + custom. Two extensions queued behind the Settings panel landing (so a new style is just a new dropdown entry + new prompt branch, not a structural change):
   - **Captain's Log** _(easter-egg, ships as a victory-lap commit right after the Settings panel)_ — rewrites dictation as a Star-Trek-style log entry. Prepends `Captain's log, stardate <X>` where stardate is computed from the current real-world date (TNG-era approximation: `1000 × (year − 2323) + (day_of_year × 1000 / 365.25)`, rendered to one decimal — for 2026-04-29 we'll absolute-value the negative result or pick a fixed forward-shift offset so it reads like a future entry). Rewrites the body in formal 24th-century space-faring tone — "Set course for…", "We have detected…", "The crew is investigating…", "End log." — without changing the underlying content. Same `aggressiveness` knob as other styles to keep it from hallucinating plot. Idiom whitelist prevents invented ship names / canon characters / numeric stardate prefixes. ~1-2 hours of work because all the structural pieces (Style enum, prompt branching, Settings dropdown) are already in place.
   - **Auto-format** — see "Structured formatting (app-aware)" below; the larger of the two style extensions.
-- **App-context detection** — `GetForegroundWindow` + UI Automation to detect Slack vs Gmail vs IDE, applies the right style automatically.
+- ✅ **App-context detection** _(shipped in Wave 5)._ macOS uses `NSWorkspace::frontmostApplication()` for bundle ID + localized name; Windows uses `GetForegroundWindow` + `K32GetModuleFileNameExW`. Plumbed into the cleanup prompt's `<APP-CONTEXT>` block. Per-app style overrides via the `auto-format` style remain queued (Wave 6 Option A).
 - **Structured formatting (app-aware)** — beyond punctuation. Wispr Flow's superpower is that long dictations come back as actual _structure_: bullet lists when you spoke a list, paragraph breaks when you paused, a greeting + signature in Mail, code fenced when you said "in code". Plumbing: extend the cleanup prompt with a structure-detection pass keyed on app context (Mail / Slack / Notion / IDE / generic) plus heuristics on the raw transcript ("first… second… third" → numbered list; >25s of speech → paragraph splits at sentence-boundary pause markers). Surfaces as a sixth Style ("Auto-format") that overrides tone-only styles when the model has high confidence; falls back to plain casual cleanup otherwise.
 - ✅ **In-app Settings panel** — shipped in Wave 4B (`509e7a7`). Whisper / LLM / embed pickers (with parameter counts in dropdown labels), hotkey rebind UI, vocabulary editor, privacy toggle, settings export/import, persisted via `tauri-plugin-store`. See `docs/waves/wave-4b-settings-panel.md`.
 
@@ -132,9 +330,8 @@ Goal: beats Wispr Flow on memory.
 
 Goal: 1.0.
 
-- **NVIDIA Parakeet TDT 0.6B v3** as default STT (faster, more accurate, native streaming) via `sherpa-onnx`. Whisper becomes the multilingual fallback.
-  - **Status:** scaffolded. Listed in the model picker as a `available: false` preview entry (commit `a8f5b52`); `validate_settings` rejects selection so the daemon can't try to load. Bindings file already exposes the option to the FE.
-  - **Concrete work to land:** (a) add `sherpa-rs` Rust binding crate + the sherpa-onnx C++ runtime to the build (similar effort to whisper.cpp); (b) extend the model-download script to fetch Parakeet's ONNX file set (encoder + decoder + joiner + `tokens.txt`); (c) new `stt/parakeet.rs` implementing `SttEngine`; (d) add an `engine: "whisper" | "parakeet"` field to `WhisperSettings` (or rename to `SttSettings`); (e) `session.rs` dispatches on engine; (f) decide streaming behavior — Parakeet has native chunked streaming, so the LA2-on-cumulative-buffer path doesn't apply, we'd either skip partials or use sherpa's streaming API; (g) flip `available: true` in `whisper_models()`. ~1-2 focused days.
+- ✅ **NVIDIA Parakeet TDT 0.6B engine** _(shipped in Wave 5 on `feat/wave-5`, behind the `parakeet-engine` Cargo feature)._ `stt/parakeet.rs` over `sherpa-rs 0.6.8` (with `sherpa-rs-sys` pinned to the same patch — caret-version drift was breaking struct layouts). Multi-file ONNX bundle (encoder/decoder/joiner.onnx + tokens.txt). Download script auto-runs a Python metadata-propagation step (`scripts/parakeet-propagate-metadata.py`) because the published `v2-int8` bundle ships ASR metadata only on encoder.onnx and sherpa-onnx 1.10+ wants it on the decoder too. `model_type=""` in the config defers to auto-detection from encoder metadata, which routes sherpa-onnx to its NeMo TDT loader. `session::LoadedStt` is a runtime engine enum; Parakeet is offline-only (no streaming partials yet — Wave 5d carry-over against `LocalAgreement2`). Probe: `cargo run --example parakeet_probe --features "real-engines parakeet-engine"`.
+  - **Default flip pending:** the Rust default is still Whisper. Once Parakeet UAT confirms parity-or-better cleanup quality at lower latency on M-series, flip the default in `default_whisper_model()` and bundle Parakeet in the production installer (vs Whisper as the multilingual fallback). Tracked alongside Wave 7 production polish.
 - **TEN-VAD** swap-in (faster endpoint detection than Silero).
 - **Onboarding wizard** — model download, mic test, hotkey config, accessibility permissions (macOS), Windows SmartScreen explainer.
 - **Code signing** — Azure Trusted Signing on Windows, Developer ID + notarization on macOS.
@@ -171,10 +368,10 @@ Goal: continuous-recording meetings produce transcript + summary as markdown aut
 
 ## What we are deliberately not building
 
-- Mobile (Wispr Flow's edge; we're desktop-first).
-- Cloud sync of dictionary/snippets across devices (local-first means the data stays here).
-- Team features.
-- Voice-control automation (Talon's territory; different problem).
+- **Wispr-clone on iOS.** A push-to-talk-anywhere iOS app (their model — keyboard extension, paste-into-any-app) competes with Wispr + AudioPen on their turf. We're not chasing that fight. _The mobile companion sketch in Future Ideas (capture-and-sync with E2E + on-device local) is a different product — it doubles down on privacy + memory rather than copy Wispr._
+- **Vendor-controlled cloud sync.** Any sync we ship is end-to-end encrypted with user-hosted keys (Signal-style); we never see plaintext, even if we run a relay. If we can't make E2E work, we don't ship sync.
+- **Team features.** Multi-user shared corpora, collaborative dictation, etc. Single-user product.
+- **Voice-control automation.** Talon's territory; different problem.
 
 ## How feature decisions get made
 

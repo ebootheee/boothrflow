@@ -1,6 +1,7 @@
 <script lang="ts">
   export type IconName =
     | "audio"
+    | "bar-chart"
     | "book"
     | "brain"
     | "check"
@@ -15,11 +16,13 @@
     | "lock"
     | "mic"
     | "pen"
+    | "play"
     | "radio"
     | "server"
     | "settings"
     | "shield"
     | "sparkles"
+    | "star"
     | "upload"
     | "x"
     | "zap";
@@ -53,6 +56,11 @@
     <path d="M12 4v16" />
     <path d="M16 8v8" />
     <path d="M20 11v2" />
+  {:else if name === "bar-chart"}
+    <path d="M4 20V10" />
+    <path d="M10 20V4" />
+    <path d="M16 20v-8" />
+    <path d="M3 20h18" />
   {:else if name === "book"}
     <path d="M5 4h9a4 4 0 0 1 4 4v12H8a3 3 0 0 1-3-3V4z" />
     <path d="M8 4v13" />
@@ -109,6 +117,8 @@
   {:else if name === "pen"}
     <path d="M4 20h4l11-11a2.5 2.5 0 0 0-4-4L4 16v4z" />
     <path d="m13 6 5 5" />
+  {:else if name === "play"}
+    <path d="M7 5v14l12-7z" />
   {:else if name === "radio"}
     <circle cx="12" cy="12" r="2" />
     <path d="M8 8a6 6 0 0 0 0 8" />
@@ -134,6 +144,8 @@
     <path d="m12 3 1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8L12 3z" />
     <path d="m19 14 .8 1.8 1.7.7-1.7.7L19 19l-.8-1.8-1.7-.7 1.7-.7L19 14z" />
     <path d="m5 14 .7 1.5L7 16l-1.3.5L5 18l-.7-1.5L3 16l1.3-.5L5 14z" />
+  {:else if name === "star"}
+    <path d="m12 3 2.6 5.6 6.4.6-4.8 4.4 1.4 6.4L12 16.7l-5.6 3.3 1.4-6.4L3 9.2l6.4-.6L12 3z" />
   {:else if name === "upload"}
     <path d="M12 15V3" />
     <path d="m17 8-5-5-5 5" />

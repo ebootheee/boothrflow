@@ -46,11 +46,18 @@ impl Pipeline<'_> {
         let formatted = if skipped_llm {
             stt.text.clone()
         } else {
+            let app_context = app_exe.as_deref().map(|exe| crate::context::AppContext {
+                app_exe: exe.to_string(),
+                app_name: exe.trim_end_matches(".exe").to_string(),
+                window_title: None,
+                control_role: None,
+            });
             self.llm
                 .cleanup(CleanupRequest {
                     raw_text: &stt.text,
                     style,
-                    app_context: app_exe.as_deref(),
+                    app_context,
+                    ..Default::default()
                 })?
                 .text
         };

@@ -567,6 +567,18 @@ Settings → Data:
 
 ## 11. Phased Roadmap
 
+> **Note (May 2026):** this section is the original 12-week plan as
+> drafted at project start. Phases 1, 2 (intelligence layer), and 3
+> (memory + differentiators) shipped on `main` between April–May 2026
+> across Waves 1–4b; the Wave 5 work on `feat/wave-5` adds the
+> context-aware-cleanup features that were originally listed in
+> Phase 2 (OCR window context, auto-learn correction store, app-
+> context detection) plus a Parakeet engine implementation that the
+> original plan had slotted for Phase 4. **Current state and the
+> next-up work live in [`ROADMAP.md`](./ROADMAP.md) and
+> [`CHANGELOG.md`](./CHANGELOG.md);** this section is preserved as
+> the original spec / decision record.
+
 ### Phase 0 — Decide & Scaffold (Week 0, 3 days)
 
 - Day 1: Spike — clone Handy and Whispering, run both, decide foundation. Write `DECISIONS.md`.

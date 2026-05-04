@@ -19,8 +19,10 @@
   },
   "scripts": {
     "dev": "tauri dev",
+    "dev:parakeet": "tauri dev --features parakeet-engine",
     "dev:msvc": "scripts\\cargo-msvc.bat pnpm exec tauri dev",
     "build": "tauri build",
+    "build:parakeet": "tauri build --features parakeet-engine",
     "build:msvc": "scripts\\cargo-msvc.bat pnpm exec tauri build",
     "download:model": "scripts\\download-model.bat",
     "download:model:mac": "scripts/download-model.sh",
@@ -32,6 +34,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "gen": "cd src-tauri && cargo run --example export_bindings --features real-engines",
+    "bench:replay": "cd src-tauri && cargo run --example bench_replay --features \"real-engines parakeet-engine\"",
     "test": "pnpm test:fe && pnpm test:rust",
     "test:fe": "vitest run",
     "test:fe:watch": "vitest",

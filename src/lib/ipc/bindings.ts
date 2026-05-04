@@ -48,6 +48,24 @@ export const commands = {
 	 */
 	microphoneAvailable: () => __TAURI_INVOKE<boolean>("microphone_available"),
 	/**
+	 *  Probe whether Screen Recording TCC is currently granted, without
+	 *  triggering the OS prompt. Returns `true` on non-macOS (no-op) so
+	 *  the FE doesn't need to branch — the OCR feature itself is gated
+	 *  at runtime by the actual capture call.
+	 */
+	screenRecordingAvailable: () => __TAURI_INVOKE<boolean>("screen_recording_available"),
+	/**
+	 *  Eagerly request Screen Recording permission so the OS prompt
+	 *  fires now (rather than the first time the cleanup pass tries an
+	 *  OCR capture mid-dictation, which is the worst possible moment).
+	 *  Returns whether access is granted afterwards. The OS prompt only
+	 *  appears once per app per macOS reset; subsequent calls just
+	 *  return the current state. Calls `CGRequestScreenCaptureAccess()`
+	 *  which both prompts and registers the app in System Settings →
+	 *  Privacy & Security → Screen Recording.
+	 */
+	requestScreenRecordingPermission: () => __TAURI_INVOKE<boolean>("request_screen_recording_permission"),
+	/**
 	 *  Report which Whisper model file the daemon will load (or already loaded).
 	 *  The UI uses this to show "tiny.en" / "base.en" / "small.en" rather than a
 	 *  hardcoded label, so the chip stays honest after the user swaps models via
@@ -70,6 +88,22 @@ export const commands = {
 	 *  across macOS / Windows / Linux.
 	 */
 	revealPath: (path: string) => typedError<null, BoothError>(__TAURI_INVOKE("reveal_path", { path })),
+	benchList: () => typedError<CaptureRow[], BoothError>(__TAURI_INVOKE("bench_list")),
+	benchLoad: (wavFilename: string) => typedError<{
+	wav: string,
+	audio_seconds: number,
+	variants: Variant[],
+} | null, BoothError>(__TAURI_INVOKE("bench_load", { wavFilename })),
+	benchSave: (wavFilename: string, variants: VariantsFile) => typedError<null, BoothError>(__TAURI_INVOKE("bench_save", { wavFilename, variants })),
+	benchWavPath: (wavFilename: string) => typedError<string, BoothError>(__TAURI_INVOKE("bench_wav_path", { wavFilename })),
+	/**
+	 *  Returns true when the app was launched with `BOOTHRFLOW_DEV=1`.
+	 *  The FE uses this to gate developer-only surfaces (Benchmarks tab,
+	 *  future engine pickers, etc.) so production builds stay clean for end
+	 *  users. Available in both feature variants — the test-fakes build
+	 *  answers honestly even though most dev surfaces aren't wired up there.
+	 */
+	devModeEnabled: () => __TAURI_INVOKE<boolean>("dev_mode_enabled"),
 };
 
 /* Types */
@@ -83,6 +117,28 @@ export type AppSettings = {
 	hotkeys: HotkeySettings,
 	vocabulary: string,
 	per_app_styles: AppStyleOverride[],
+	/**
+	 *  Wrong → right substitutions injected into the cleanup prompt's
+	 *  `<USER-CORRECTIONS>` block. Auto-populated by the post-paste
+	 *  learning coordinator (Wave 5); manually editable in Settings.
+	 */
+	commonly_misheard?: MisheardReplacement[],
+	/**
+	 *  Pull the focused window's OCR contents into the cleanup prompt
+	 *  as supporting context (Wave 5). Off by default; opt-in. Honors
+	 *  `privacy_mode` — when privacy is on, OCR is skipped regardless
+	 *  of this flag.
+	 */
+	cleanup_window_ocr?: boolean,
+	/**
+	 *  Watch the focused field after a paste; if the user makes a
+	 *  small single-word edit (Levenshtein ≤ 3), append the
+	 *  `(original, edited)` pair to `commonly_misheard` so the cleanup
+	 *  prompt's `<USER-CORRECTIONS>` block applies it next time. Off
+	 *  by default — auto-edits a settings field, which is the kind
+	 *  of thing that needs explicit consent.
+	 */
+	auto_learn_corrections?: boolean,
 };
 
 export type AppStyleOverride = {
@@ -97,6 +153,23 @@ export type AppStyleOverride = {
  *  because the payload can't be merged with the tag at the same level).
  */
 export type BoothError = { kind: "audio-capture"; message: string } | { kind: "transcription"; message: string } | { kind: "formatting"; message: string } | { kind: "injection"; message: string } | { kind: "internal"; message: string };
+
+export type CaptureRow = {
+	wav_filename: string,
+	captured_at: string,
+	app_exe: string | null,
+	audio_seconds: number,
+	// Engine that produced the original capture (sidecar `engine` field).
+	original_engine: string,
+	raw: string,
+	formatted: string,
+	// Has a sibling `<stem>.variants.json`?
+	has_variants: boolean,
+	// Number of variants in the variants file.
+	variant_count: number,
+	// Number of variants that have a `grade` field set.
+	graded_count: number,
+};
 
 export type DictateResult = {
 	raw: string,
@@ -164,7 +237,26 @@ export type LlmTestResult = {
 	error: string | null,
 };
 
-export type MacPermissionPane = "microphone" | "accessibility" | "input_monitoring";
+export type MacPermissionPane = "microphone" | "accessibility" | "input_monitoring" | 
+/**
+ *  Required for the Wave 5 focused-window OCR capture path. The
+ *  runtime call site is still a stub on every platform — see
+ *  `docs/waves/wave-5-context-aware-cleanup.md` — but exposing the
+ *  pane lets users pre-grant the permission so the first OCR
+ *  capture after wiring doesn't fail with a denied prompt.
+ */
+"screen_recording";
+
+/**
+ *  Wrong → right substitution recorded by the user (manually edited in
+ *  Settings) or by the post-paste learning coordinator (auto-derived
+ *  from edits the user makes after a paste). The cleanup prompt
+ *  honors these as authoritative spellings.
+ */
+export type MisheardReplacement = {
+	wrong: string,
+	right: string,
+};
 
 export type ModelOption = {
 	value: string,
@@ -202,6 +294,9 @@ export type SettingsPatch = {
 	hotkeys?: HotkeySettings | null,
 	vocabulary?: string | null,
 	per_app_styles?: AppStyleOverride[] | null,
+	commonly_misheard?: MisheardReplacement[] | null,
+	cleanup_window_ocr?: boolean | null,
+	auto_learn_corrections?: boolean | null,
 };
 
 export type Style = "raw" | "formal" | "casual" | "excited" | "very-casual" | 
@@ -210,6 +305,25 @@ export type Style = "raw" | "formal" | "casual" | "excited" | "very-casual" |
  *  24th-century rewrite. See ROADMAP § Phase 2 / Style presets.
  */
 "captains-log";
+
+export type Variant = {
+	config_id: string,
+	engine: string,
+	llm_model: string,
+	style: string,
+	raw: string,
+	formatted: string,
+	stt_ms: number,
+	llm_ms: number,
+	grade?: number | null,
+	notes?: string | null,
+};
+
+export type VariantsFile = {
+	wav: string,
+	audio_seconds: number,
+	variants: Variant[],
+};
 
 export type WhisperDownloadResult = {
 	model: string,

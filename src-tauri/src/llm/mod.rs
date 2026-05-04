@@ -1,13 +1,31 @@
 //! LLM cleanup pass — turns raw STT into clean written text in a chosen style.
 
+use crate::context::AppContext;
 use crate::error::Result;
-use crate::settings::Style;
+use crate::settings::{MisheardReplacement, Style};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CleanupRequest<'a> {
     pub raw_text: &'a str,
     pub style: Style,
-    pub app_context: Option<&'a str>,
+    /// Foreground app + window at the moment the user finished dictating.
+    /// `None` when context detection isn't supported on this platform or
+    /// the detector failed (always graceful — cleanup runs regardless).
+    pub app_context: Option<AppContext>,
+    /// Best-effort OCR of the focused window's contents. Wave 5 feature;
+    /// off by default, opt-in via Settings + `Privacy mode`. The cleanup
+    /// prompt's `<OCR-RULES>` block tells the LLM to use this only as
+    /// supporting context — preserves spoken words when there's no
+    /// recognition miss to correct.
+    pub window_ocr: Option<String>,
+    /// User's curated vocabulary list (proper nouns, jargon). Plumbed
+    /// into the prompt as `<USER-CORRECTIONS>` "treat these spellings
+    /// as authoritative". Auto-populated by the post-paste learning
+    /// coordinator; manually editable in Settings.
+    pub preferred_transcriptions: Vec<String>,
+    /// Wrong → right pairs the user (or auto-learning) recorded. Same
+    /// `<USER-CORRECTIONS>` block, with explicit substitution rules.
+    pub commonly_misheard: Vec<MisheardReplacement>,
 }
 
 /// Result of a cleanup pass, carrying both the rewritten text and timing /
@@ -43,6 +61,8 @@ pub trait LlmCleanup: Send + Sync {
 
     fn name(&self) -> &str;
 }
+
+pub mod prompt;
 
 #[cfg(any(test, feature = "test-fakes"))]
 pub mod fake;
