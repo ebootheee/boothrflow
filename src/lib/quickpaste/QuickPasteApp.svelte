@@ -60,7 +60,7 @@
   <input
     bind:this={inputEl}
     class="qp-search"
-    placeholder="Search history… (Esc to close, ↑↓ to navigate, Enter to paste)"
+    placeholder="Search history"
     value={quickPaste.query}
     oninput={onInput}
     autocomplete="off"

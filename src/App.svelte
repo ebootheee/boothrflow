@@ -713,7 +713,7 @@
                 class="settings-nav-item"
                 class:active={activeSettingsSection === "whisper"}
                 onclick={() => (activeSettingsSection = "whisper")}
-                ><Icon name="mic" size={14} /> Whisper</button
+                ><Icon name="mic" size={14} /> Speech</button
               >
               <button
                 type="button"
