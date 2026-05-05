@@ -258,6 +258,16 @@ pub fn microphone_available() -> bool {
     true
 }
 
+/// Enumerate available input devices for the Settings UI's mic
+/// dropdown. Real-engines only — same module that owns the cpal
+/// dependency.
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+#[specta::specta]
+pub fn list_audio_input_devices() -> Result<Vec<crate::audio::MicDevice>, BoothError> {
+    crate::audio::CpalAudioSource::list_devices()
+}
+
 /// Probe whether Screen Recording TCC is currently granted, without
 /// triggering the OS prompt. Returns `true` on non-macOS (no-op) so
 /// the FE doesn't need to branch — the OCR feature itself is gated

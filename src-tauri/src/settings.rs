@@ -157,6 +157,24 @@ pub struct AppSettings {
     /// of thing that needs explicit consent.
     #[serde(default)]
     pub auto_learn_corrections: bool,
+    /// Explicit microphone device name to capture from. Empty string =
+    /// auto-pick (system default, with optional Bluetooth-avoidance —
+    /// see `prefer_builtin_mic_with_bluetooth`). The exact device
+    /// names come from `audio::CpalAudioSource::list_devices()`.
+    /// Stored as `String` (not `Option<String>`) to keep the patch
+    /// shape simple — the FE can clear it by sending an empty string.
+    #[serde(default)]
+    pub audio_input_device: String,
+    /// When true (default) and `audio_input_device` is None, pick the
+    /// built-in MacBook mic instead of the system default if the
+    /// system default is a Bluetooth device (AirPods, Beats, etc.).
+    /// Avoids the macOS HFP downgrade — opening a Bluetooth mic stream
+    /// forces the entire BT link from A2DP (high-quality stereo) into
+    /// HFP (telephony codec, mono), which dims any music playing
+    /// through the same headphones for ~30 seconds. Built-in mic is
+    /// slightly lower quality but keeps A2DP intact.
+    #[serde(default = "default_true")]
+    pub prefer_builtin_mic_with_bluetooth: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]
@@ -184,6 +202,10 @@ pub struct SettingsPatch {
     pub cleanup_window_ocr: Option<bool>,
     #[specta(optional)]
     pub auto_learn_corrections: Option<bool>,
+    #[specta(optional)]
+    pub audio_input_device: Option<String>,
+    #[specta(optional)]
+    pub prefer_builtin_mic_with_bluetooth: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -255,6 +277,8 @@ impl Default for AppSettings {
             commonly_misheard: Vec::new(),
             cleanup_window_ocr: false,
             auto_learn_corrections: false,
+            audio_input_device: String::new(),
+            prefer_builtin_mic_with_bluetooth: true,
         }
     }
 }
@@ -304,6 +328,11 @@ impl SettingsStore {
             cleanup_window_ocr: self.get_or("cleanup_window_ocr", fallback.cleanup_window_ocr)?,
             auto_learn_corrections: self
                 .get_or("auto_learn_corrections", fallback.auto_learn_corrections)?,
+            audio_input_device: self.get_or("audio_input_device", fallback.audio_input_device)?,
+            prefer_builtin_mic_with_bluetooth: self.get_or(
+                "prefer_builtin_mic_with_bluetooth",
+                fallback.prefer_builtin_mic_with_bluetooth,
+            )?,
         };
         // Prefer the OS keychain over whatever's in the settings JSON.
         // Keys land in JSON only as a legacy migration path or when the
@@ -359,6 +388,12 @@ impl SettingsStore {
         }
         if let Some(auto_learn_corrections) = patch.auto_learn_corrections {
             settings.auto_learn_corrections = auto_learn_corrections;
+        }
+        if let Some(audio_input_device) = patch.audio_input_device {
+            settings.audio_input_device = audio_input_device;
+        }
+        if let Some(prefer_builtin) = patch.prefer_builtin_mic_with_bluetooth {
+            settings.prefer_builtin_mic_with_bluetooth = prefer_builtin;
         }
 
         validate_settings(&settings)?;
@@ -420,6 +455,11 @@ impl SettingsStore {
         self.set("commonly_misheard", &settings.commonly_misheard)?;
         self.set("cleanup_window_ocr", settings.cleanup_window_ocr)?;
         self.set("auto_learn_corrections", settings.auto_learn_corrections)?;
+        self.set("audio_input_device", &settings.audio_input_device)?;
+        self.set(
+            "prefer_builtin_mic_with_bluetooth",
+            settings.prefer_builtin_mic_with_bluetooth,
+        )?;
         self.store
             .save()
             .map_err(|e| BoothError::internal(format!("settings save: {e}")))?;
@@ -776,6 +816,14 @@ fn default_store_entries() -> Result<HashMap<String, JsonValue>> {
     entries.insert(
         "auto_learn_corrections".into(),
         json(defaults.auto_learn_corrections)?,
+    );
+    entries.insert(
+        "audio_input_device".into(),
+        json(defaults.audio_input_device)?,
+    );
+    entries.insert(
+        "prefer_builtin_mic_with_bluetooth".into(),
+        json(defaults.prefer_builtin_mic_with_bluetooth)?,
     );
     Ok(entries)
 }

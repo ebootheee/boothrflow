@@ -356,6 +356,7 @@
     if (settingsOpen) {
       void refreshAutostart();
       void refreshAppVersion();
+      void loadMicDevices();
     }
   });
 
@@ -369,6 +370,33 @@
       micAvailable = await invoke<boolean>("microphone_available");
     } catch {
       micAvailable = false;
+    }
+  }
+
+  // List of input devices for the Settings → General → Microphone
+  // dropdown. Loaded lazily when Settings opens. Refreshed on
+  // hotplug events would be nicer, but a manual "Refresh" button is
+  // enough for now (mic plugs aren't exactly hot-path territory).
+  type MicDeviceOption = {
+    name: string;
+    is_default: boolean;
+    default_sample_rate: number;
+    channels: number;
+  };
+  let micDevices = $state<MicDeviceOption[]>([]);
+  let micDevicesLoading = $state(false);
+
+  async function loadMicDevices() {
+    if (!inDesktop) return;
+    micDevicesLoading = true;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      micDevices = await invoke<MicDeviceOption[]>("list_audio_input_devices");
+    } catch (e) {
+      console.warn("list_audio_input_devices failed:", e);
+      micDevices = [];
+    } finally {
+      micDevicesLoading = false;
     }
   }
 
@@ -1060,6 +1088,61 @@
                 </section>
 
                 {#if inDesktop}
+                  <section class="settings-section">
+                    <div class="settings-section-head">
+                      <span class="step-icon"><Icon name="mic" size={14} /></span>
+                      <div>
+                        <span class="section-kicker">Capture</span>
+                        <h3>Microphone</h3>
+                      </div>
+                    </div>
+                    <label class="settings-field">
+                      <span>Input device</span>
+                      <select
+                        value={settings.current.audio_input_device ?? ""}
+                        onchange={(event) =>
+                          void settings.update({
+                            audio_input_device: event.currentTarget.value,
+                          })}
+                      >
+                        <option value="">Auto (system default)</option>
+                        {#each micDevices as dev (dev.name)}
+                          <option value={dev.name}
+                            >{dev.name}{dev.is_default ? " (system default)" : ""}</option
+                          >
+                        {/each}
+                      </select>
+                    </label>
+                    <label class="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.current.prefer_builtin_mic_with_bluetooth ?? true}
+                        disabled={(settings.current.audio_input_device ?? "").length > 0}
+                        onchange={(event) =>
+                          void settings.update({
+                            prefer_builtin_mic_with_bluetooth: event.currentTarget.checked,
+                          })}
+                      />
+                      <span>Use built-in mic when Bluetooth headphones are connected</span>
+                    </label>
+                    <p class="settings-help">
+                      Opening a Bluetooth mic stream forces AirPods / Beats / etc. from high-quality
+                      A2DP into HFP (telephony codec, mono), which dims any music playing through
+                      the same headphones for ~30 seconds. Capturing through the built-in mic
+                      instead keeps your audio output intact at the cost of slightly worse mic
+                      quality. Override the auto-pick with the dropdown above when you specifically
+                      want the Bluetooth mic.
+                    </p>
+                    <button
+                      type="button"
+                      class="quiet-button"
+                      onclick={() => void loadMicDevices()}
+                      disabled={micDevicesLoading}
+                    >
+                      {micDevicesLoading ? "Loading..." : "Refresh device list"}
+                    </button>
+                  </section>
+
                   <section class="settings-section">
                     <div class="settings-section-head">
                       <span class="step-icon"><Icon name="zap" size={14} /></span>
