@@ -4,6 +4,34 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-05 — Wave 6 Phase 0 + small-fixes sweep
+
+### Added
+
+- **Wave 6 Phase 0 — structure-aggressiveness style overhaul** (commit `d71cb90`). New `Style` enum: **Raw / Light / Moderate / Assertive** + Captain's Log retained as orthogonal preset. Replaces the tone-based system (casual / formal / very-casual / excited). Old persisted settings auto-migrate via serde aliases (no manual fix-up needed). New cleanup prompts per level. Settings UI shows a 4-option segmented control with help text per level. Captain's Log under "Fun presets" disclosure. `bench:replay` fans out across all 4 structure styles + raw.
+- **History detail → inline expand-under-row** (commit `60bb2b0`). Old side-by-side detail panel could overflow viewport at narrow widths. Now: click a row, detail expands beneath; click same row to collapse; click another to swap. Caret glyph (▸ / ▾) signals state.
+- **Cleanup chip tok/s fallback** (commit `60bb2b0`). When the LLM backend reports `completion_tokens` + `llm_ms` but skips the explicit `tok_per_sec` field, the FE now derives tok/s from those instead of silently dropping it.
+- **Bluetooth-aware mic default + manual override** (commit `a7302de`). When system default input is a Bluetooth mic (AirPods / Beats / Sony WH/WF / Bose), boothrflow now silently uses the built-in mic instead — avoids the macOS HFP downgrade that dims music for ~30 seconds. New Settings → General → **Microphone** section with a device-picker dropdown + "Use built-in mic when Bluetooth headphones are connected" toggle (default on). User can pin any specific device explicitly via the dropdown to override the auto-pick.
+- **Assertive prompt tightening + small-LLM auto-upgrade** (commit `4ba7e95`). First bench grading exposed three failure modes: invented `### Section` headers when the speaker had no transitions, fake "Hi <name>... Best, [Your Name]" Mail signatures in non-Mail contexts, and "Sure, here is the formatted text:" preambles from qwen 1.5b. New prompt makes every structuring permission CONDITIONAL on its trigger being present (transition cues for headers, listing cues for bullets, Mail-app context for greetings) + explicit anti-pattern bans (no preambles, no `[Your Name]` placeholders, no horizontal rules, no closing summaries). Inline backticks on filenames also banned across Light / Moderate / Assertive — Claude Code's chat input was rewriting `` `devops.md` `` into `[devops.md](http://devops.md)` markdown links on paste.
+- **Auto-upgrade qwen 0.5b/1.5b/3b → 7b for Assertive only** (commit `4ba7e95`). Small models can't follow Assertive's nuanced rules. The user's configured default stays unchanged for the other styles; only Assertive routes through the upgrade. Bench `bench:replay` does NOT upgrade (preserves the 1.5b-on-Assertive variant for grading).
+- **Bench harness warmup pass** (commit `4ba7e95`). `bench:replay` now loads the engine once per config and runs a throwaway 1-second silence pass before timing the real transcription. Without this, first-tested engine paid model load + GPU context init, inflating its `stt_ms` ~10x (whisper-tiny.en went 6.3s → 770ms between two runs of identical audio in the first round).
+
+### Fixed
+
+- **Honest tok/s display** — Cleanup chip now shows tok/s in more cases (any LLM that reports `completion_tokens` will get a derived tok/s, not just ones that ship the explicit field).
+- **Music-dimming on Bluetooth output** — see Bluetooth mic default above. Was a real macOS HFP behavior, not a boothrflow bug, but the default behavior now sidesteps it.
+
+### Changed
+
+- **Settings → General → Style** picker is now a segmented control (4 buttons) rather than a 6-option dropdown. Visual reinforcement of "level" mental model. Help text per option.
+- **Defaults for new installs**: structure-aggressiveness = `Light` (default in the migration map for legacy `casual` / `very-casual` / `excited`). Mic = "Auto" (system default with Bluetooth-aware fallback). Toggle = on.
+
+### Lessons learned (carried into Phase 1+ planning)
+
+- **Bench cold-start ordering bias was real and significant** — first-tested engine ate the model-load cost, looked 10x slower than the others. Phase 3 `bench harness hardening` partially shipped (warmup); N=3 + median + aggregate-leaderboard still pending.
+- **Small LLMs can't follow Assertive's nuanced rules** — qwen 1.5b on long Assertive prompts emits placeholders, fake signatures, preambles. The auto-upgrade is the right pattern; we'll likely need similar guardrails for any future structure-heavy style.
+- **Plain-prose backticks on filenames cause more problems than they solve** — even when the destination renders markdown (Slack, Notion, Obsidian), apps like Claude Code interpret them as auto-link triggers. Plain text is the safe default; code fences for actual code only.
+
 ## 2026-05-04 — wave reordering (Wave 6 ↔ 7 swap, Wave 8 added)
 
 ### Changed

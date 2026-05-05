@@ -44,14 +44,20 @@ UAT checklist: [`docs/uat/wave-5-checklist.md`](./docs/uat/wave-5-checklist.md).
 
 **Plan:** [`docs/waves/wave-6-engine-and-formatting.md`](./docs/waves/wave-6-engine-and-formatting.md). Get the engine and the cleanup pass right _before_ we package + ship. Better one user (Eric) on a fast iteration loop with the right engine than ten users on a signed installer of a placeholder.
 
-**Phases:**
+**Phases (status as of 2026-05-05):**
 
-0. **Style overhaul** (1-2d, day-one) — replace the tone-based system (casual / formal / very-casual / excited) with a single **structuring-aggressiveness axis** (raw / light / moderate / assertive). Tone variation turned out to be noise; structure is what users actually want to vary. `Assertive` adopts Wispr's auto-format playbook (bullets when listing, paragraph breaks, code fences, greeting + sign-off in Mail context). Captain's Log retained as an orthogonal fun preset.
-1. **Nemotron Speech Streaming via sherpa-onnx** (3-5d) — NVIDIA already ships ONNX exports for cache-aware streaming at 80-1120ms chunks. Same param scale as our current 0.6B Parakeet, so quality should hold while gaining live preview.
-2. **parakeet.cpp evaluation** (2-3d) — C++ Parakeet impl with Metal acceleration via Axiom. Bench against sherpa-onnx Parakeet on the same wavs; swap on macOS only if it wins by >2× on load+decode.
-3. **Bench harness hardening** (1d) — warmup pass + N=3 median. Cold-start ordering bias caused tiny.en to look 9× slower than base.en in Wave 5 first-run numbers; fix it before relying on Phase 1+2 numbers.
+0. ✅ **Style overhaul** _(shipped — `d71cb90` + `4ba7e95`)_. Replaced the tone-based system (casual / formal / very-casual / excited) with a **structuring-aggressiveness axis** (raw / light / moderate / assertive). Captain's Log retained as orthogonal fun preset. Old settings auto-migrate via serde aliases. Assertive prompt rewritten _twice_: first round invented headers + emitted fake Mail signatures; tightened version makes every structuring permission strictly conditional on its trigger + bans `[Your Name]` placeholders / preambles / inline-filename backticks. Auto-upgrade qwen 0.5b/1.5b/3b → qwen2.5:7b for Assertive only (small models can't follow the rules). Default for new installs: Light.
+1. ⏳ **Nemotron Speech Streaming via sherpa-onnx** (3-5d) — NVIDIA already ships ONNX exports for cache-aware streaming at 80-1120ms chunks. Same param scale as our current 0.6B Parakeet, so quality should hold while gaining live preview.
+2. ⏳ **parakeet.cpp evaluation** (2-3d) — C++ Parakeet impl with Metal acceleration via Axiom. Bench against sherpa-onnx Parakeet on the same wavs; swap on macOS only if it wins by >2× on load+decode.
+3. ⏳ **Bench harness hardening** _(partially shipped — `4ba7e95`)_. Warmup pass landed (engine loaded once per config, throwaway 1-second silence transcription before timed run). N=3 + median + variance still pending. Aggregate "across all captures" leaderboard in Benchmarks tab still pending.
 
 After this wave, the default STT + cleanup style for production is re-decided based on leaderboard mean grade across ≥ 3 captures.
+
+### Wave 6 small-fixes (landed alongside Phase 0)
+
+- ✅ **History detail → inline expand-under-row** (`60bb2b0`). No more off-screen detail panel.
+- ✅ **Cleanup chip tok/s fallback** (`60bb2b0`). Derives tok/s from completion_tokens + llm_ms when the backend skips the explicit field.
+- ✅ **Bluetooth-aware mic default + manual device picker** (`a7302de`). Switches to built-in mic when AirPods / Beats / Bose / Sony WH/WF are the system default — avoids macOS HFP downgrade that dims music for ~30 seconds. Override the auto-pick via the new dropdown in Settings → General → Microphone.
 
 ### Already-shipped Wave 6 prerequisites (Wave 5)
 

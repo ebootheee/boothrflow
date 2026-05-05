@@ -2,6 +2,8 @@
 
 > Push-to-talk dictation that runs entirely on your machine: streaming STT → LLM cleanup with styles → paste into any app → searchable history. Fast, embedded, private.
 
+> **PLAN.md is the original engineering plan from project inception.** It documents the architectural decisions and the original spec. For _current state_ (what's actually shipped, what's queued, what changed), use [`ROADMAP.md`](./ROADMAP.md) + [`CHANGELOG.md`](./CHANGELOG.md). Some examples here (e.g., the `casual / formal / excited` style names) reflect the original design — Wave 6 Phase 0 has since replaced the tone-based style system with a structuring-aggressiveness axis (raw / light / moderate / assertive). The architecture sections (audio path, STT/LLM dispatch, paste injection, storage) remain authoritative.
+
 ---
 
 ## 0. TL;DR — the decisions

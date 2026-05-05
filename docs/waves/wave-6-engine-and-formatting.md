@@ -1,5 +1,11 @@
 # Wave 6 — Engine + formatting
 
+**Status (2026-05-05):** Phase 0 ✅ shipped. Phase 3 partially shipped
+(warmup pass landed; N=3 + median + cross-capture aggregate leaderboard
+still pending). Phases 1 + 2 not yet started. Small-fixes punch list
+at the bottom of this doc tracks adjacent items that landed during
+Phase 0 grading.
+
 **Goal:** dial in the engine _and_ the cleanup pass before we touch
 production packaging. Two parallel tracks:
 
@@ -49,10 +55,52 @@ signed installer of a placeholder.
 
 ---
 
-## Phase 0 — Style overhaul: structure-aggressiveness axis (1–2 days)
+## Phase 0 — Style overhaul: structure-aggressiveness axis ✅ shipped (2026-05-05)
 
-The current `Style` enum (`Casual`, `Formal`, `VeryCasual`, `Excited`,
-`Raw`, `CaptainsLog`) mixes two axes:
+**Commits:** `d71cb90` (initial overhaul) + `4ba7e95` (Assertive
+prompt tightening + small-LLM auto-upgrade after first-round bench
+grading exposed three failure modes).
+
+### What landed
+
+- `Style` enum rewritten — `Raw / Light / Moderate / Assertive` +
+  `CaptainsLog` retained as orthogonal fun preset. Old persisted
+  settings (`casual` / `very-casual` / `excited` / `formal`)
+  auto-migrate via serde aliases — no manual fix-up needed when
+  upgrading.
+- Cleanup prompt branches per level. The Assertive prompt was
+  rewritten _twice_: first version emitted invented headers + fake
+  Mail signatures + qwen-1.5b preambles (`"Sure, here is the
+formatted text:"` / `[Your Name]`). Second version makes every
+  structuring permission strictly conditional on its trigger
+  (transition cues, listing cues, Mail-app context) and adds
+  explicit anti-pattern bans.
+- Settings UI: 4-option segmented control with help text per
+  option. Captain's Log under "Fun presets" disclosure.
+- `bench:replay` fans out across all 4 structure styles + raw.
+- **Auto-upgrade qwen 0.5b/1.5b/3b → qwen2.5:7b for Assertive only.**
+  Small models can't follow Assertive's nuanced rules. The user's
+  configured default stays unchanged for Light / Moderate / Raw /
+  Captain's Log; only Assertive routes through the upgrade.
+- **Inline filename backticks banned** across Light / Moderate /
+  Assertive prompts. Claude Code's chat input was rewriting
+  `` `devops.md` `` into `[devops.md](http://devops.md)` markdown
+  links on paste. Plain text is now the rule for filenames in prose.
+
+### What we deferred (still open)
+
+- **Per-app default suggestions** (Slack/Discord → Light, Mail/Notion
+  → Moderate). Listed in original deliverables but not strictly
+  required for the Phase 0 acceptance — punt to a follow-up wave or
+  a small-fix sweep.
+- **Auto-promote long utterances to Assertive.** Listed as an open
+  question. Bench grading will clarify whether this is wanted; we
+  haven't done enough scored captures to commit.
+
+### Original spec (preserved for reference)
+
+The previous `Style` enum (`Casual`, `Formal`, `VeryCasual`, `Excited`,
+`Raw`, `CaptainsLog`) mixed two axes:
 
 - **Tone** (casual ↔ formal ↔ excited)
 - **Structure** (raw ↔ cleaned-up)
@@ -231,20 +279,35 @@ the bench numbers prove it.
 
 ---
 
-## Phase 3 — Bench harness hardening (1 day)
+## Phase 3 — Bench harness hardening (1 day) — ⏳ partially shipped
 
 Eric flagged in Wave 5 that the harness was confounded by cold-start
 ordering — first-tested engine ate the model-load cost. Fix that as
 part of this wave so the Phase 1 + 2 numbers are trustworthy.
 
-### Deliverables
+### Status
 
-- **Warmup pass**: each STT engine gets one throwaway transcribe
-  call (1-second silence buffer is fine) before the timed runs.
-- **N=3 with median**: each timed run repeats 3 times, harness
+| Deliverable                                                                              | Status     | Commit    |
+| ---------------------------------------------------------------------------------------- | ---------- | --------- |
+| Warmup pass per engine before timed run                                                  | ✅ shipped | `4ba7e95` |
+| Refactor `SttConfig::transcribe` → `load_engine` so warmup + timed share a loaded engine | ✅ shipped | `4ba7e95` |
+| N=3 timed runs + median + variance                                                       | ⏳ pending | —         |
+| Aggregate "across all captures" leaderboard in Benchmarks tab                            | ⏳ pending | —         |
+| `stt_ms_runs: [u64; 3]` field added to variants JSON (backwards-compat)                  | ⏳ pending | —         |
+
+### Deliverables (original spec, with status notes)
+
+- **Warmup pass** ✅ — each STT engine gets one throwaway transcribe
+  call (1-second silence buffer) before the timed runs. Engine is
+  loaded once, reused across warmup + timed pass + LLM cleanup
+  loops, then dropped before the next config.
+- **N=3 with median** ⏳ — each timed run repeats 3 times, harness
   records the median rather than the single sample. Variance also
-  recorded so we know if a config is unstable.
-- **Aggregate grading view**: in the Benchmarks tab, add a "across
+  recorded so we know if a config is unstable. Single-run timing is
+  still in place; once we have a baseline of warmed-up numbers from
+  the first re-run, we'll know whether N=3 is necessary or
+  overkill.
+- **Aggregate grading view** ⏳ — in the Benchmarks tab, add a "across
   all captures" leaderboard alongside the per-capture one. Helps
   pick the default once we have ≥ 5 graded captures.
 
@@ -252,9 +315,12 @@ part of this wave so the Phase 1 + 2 numbers are trustworthy.
 
 - Cold-start asymmetry < 10% between first-tested and
   third-tested STT engines.
+  - Status: warmup landed; first re-run of `bench:replay` will
+    confirm.
 - The variants JSON schema doesn't break — backwards-compatible
   evolution. (Add `stt_ms_runs: [u64; 3]` alongside the existing
   `stt_ms`; old files without the new field still load.)
+  - Status: pending — no schema change yet.
 
 ---
 
@@ -293,3 +359,66 @@ production builds gets re-decided based on graded variants across
 
 The leaderboard mean grade picks the winner. Tie goes to whichever
 is simpler to maintain.
+
+---
+
+## Small-fixes punch list
+
+Adjacent items surfaced during Phase 0 grading or testing that
+landed alongside (or are queued to land before Wave 6 closes). Not
+strictly Phase 0/1/2/3 deliverables; not large enough to warrant
+their own phases.
+
+### Shipped
+
+- ✅ **History detail → inline expand-under-row** (`60bb2b0`). Old
+  side-by-side detail panel could overflow viewport at narrow
+  widths. Now expands beneath the clicked row; click again to
+  collapse, click another row to swap.
+- ✅ **Cleanup chip tok/s fallback** (`60bb2b0`). When the LLM
+  backend reports `completion_tokens` + `llm_ms` but skips the
+  explicit `tok_per_sec` field, the FE derives tok/s from those.
+- ✅ **Bluetooth-aware mic default** (`a7302de`). Avoids macOS HFP
+  downgrade that dims music when AirPods / Beats are connected.
+  Default-on toggle + manual device-picker dropdown in Settings →
+  General → Microphone. Heuristic-based name match (AirPods, Beats,
+  Sony WH/WF, Bose QuietComfort, Bluetooth, Headset).
+- ✅ **Auto-fall-back when pinned mic device disconnects**
+  (`a7302de`). If user explicitly pinned "AirPods Max" but they're
+  not connected at start time, capture falls through to system
+  default rather than failing the dictation outright.
+
+### Pending (queued for next pass)
+
+- ⏳ **Vocabulary auto-population for the user's recurring proper
+  nouns.** First-round bench captures had recurring transcription
+  artifacts on "Claude" (rendered as "Claud" / "claw") and
+  "boothrflow." Adding those + "Claude.md" + "Claude Code" to the
+  vocab field by default would catch them upstream. Could be
+  baked-in defaults, or auto-populated from the post-paste
+  learning coordinator's emitted corrections after enough
+  captures.
+- ⏳ **Capture-not-saving indicator in Benchmarks tab.** When the
+  user opens Settings → Benchmarks but `BOOTHRFLOW_DEV` isn't set,
+  show a one-line "Captures disabled — set `BOOTHRFLOW_DEV=1` and
+  relaunch" hint instead of just an empty list. (Bit Eric on
+  2026-05-04 when the env-var rename caught his dictation.)
+- ⏳ **Bench-replay LLM upgrade parity.** The live dictation flow
+  auto-upgrades qwen 1.5b → 7b on Assertive; `bench:replay` does
+  not (preserves the bad-1.5b variant for grading). Decision
+  needed: do we want bench to mirror live, or does the parallel
+  comparison of "broken 1.5b vs upgraded 7b" provide useful data?
+- ⏳ **Per-app default style suggestions.** Listed in original
+  Phase 0 deliverables but not strictly required. When the
+  focused-app context detects Slack/Discord, default to `Light`;
+  when it detects Mail/Notion/Obsidian, default to `Moderate`.
+- ⏳ **Auto-promote long utterances to Assertive.** Open question
+  from Phase 0. Bench grading needs to validate that "long → wants
+  more structure" actually holds for users; otherwise the auto-
+  promote will surprise people.
+
+### Punch list intake
+
+When something small and tactical comes up during testing, log it
+here rather than spinning out a separate task. Keeps the wave
+scope honest while making sure follow-ups don't get lost.
