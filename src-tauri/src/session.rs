@@ -706,7 +706,29 @@ mod real {
             return CleanupOutcome::passthrough(raw);
         }
         let settings = settings::current_app_settings();
-        let llm = match OpenAiCompatLlmCleanup::from_settings(&settings.llm) {
+
+        // Auto-upgrade for Assertive: small qwen models (0.5b / 1.5b / 3b)
+        // can't follow Assertive's nuanced structuring + anti-pattern rules.
+        // First-round bench grading showed qwen 1.5b emitting "[Your Name]"
+        // placeholders, fake Mail signatures in non-Mail contexts, and
+        // preamble strings ("Sure, here is..."). Bump to qwen2.5:7b for
+        // this request only, leaving the user's configured default alone.
+        // Falls through to the original model if the upgrade target isn't
+        // available — the cleanup error path already degrades gracefully
+        // to raw text.
+        let mut llm_settings = settings.llm.clone();
+        if matches!(style, settings::Style::Assertive) {
+            if let Some(upgraded) = assertive_upgrade_target(&llm_settings.model) {
+                tracing::info!(
+                    "llm: upgrading {} → {} for Assertive style",
+                    llm_settings.model,
+                    upgraded
+                );
+                llm_settings.model = upgraded;
+            }
+        }
+
+        let llm = match OpenAiCompatLlmCleanup::from_settings(&llm_settings) {
             None => return CleanupOutcome::passthrough(raw),
             Some(Ok(llm)) => llm,
             Some(Err(e)) => {
@@ -788,6 +810,34 @@ mod real {
         // Windows: TODO(wave-5b) — UIAutomation reader.
         // Linux: AT-SPI bridge, deferred.
         None
+    }
+
+    /// For Assertive style: if the configured model is too small to
+    /// reliably follow the nuanced structuring + anti-pattern rules
+    /// (preamble suppression, conditional Mail signatures, no
+    /// `[Your Name]` placeholders), return the larger model we
+    /// auto-swap to for that one request. Returns `None` for models
+    /// that already handle Assertive well (qwen2.5:7b and up, plus
+    /// non-qwen models we don't have data on).
+    ///
+    /// Decision is based on bench grading — small qwen variants ship
+    /// fake email signatures even in Claude / Slack contexts. Bench
+    /// numbers will tighten this list as we collect more graded
+    /// captures.
+    fn assertive_upgrade_target(model: &str) -> Option<String> {
+        const TOO_SMALL: &[&str] = &[
+            "qwen2.5:0.5b",
+            "qwen2.5:1.5b",
+            "qwen2.5:3b",
+            "qwen2:0.5b",
+            "qwen2:1.5b",
+        ];
+        const FALLBACK: &str = "qwen2.5:7b";
+        if TOO_SMALL.iter().any(|m| m.eq_ignore_ascii_case(model)) {
+            Some(FALLBACK.to_string())
+        } else {
+            None
+        }
     }
 
     /// Parse the user's free-text vocabulary setting into a normalized

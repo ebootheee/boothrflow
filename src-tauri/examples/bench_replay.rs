@@ -198,12 +198,38 @@ fn main() -> Result<()> {
 
         let mut variants = Vec::new();
         for stt_config in &stt_configs {
-            // Load the engine for this config; drop after replay so memory
-            // doesn't pile up across multiple Whisper variants.
             eprintln!("  ↳ {}", stt_config.engine_label);
+
+            // Load engine once. Warmup pass + timed pass share the same
+            // loaded model + GPU context, so the timed `stt_ms` measures
+            // decode cost only — not load + decode. Without this fix,
+            // whichever engine ran first paid model-load cost on its
+            // single invocation and looked ~10x slower than the others
+            // (whisper-tiny.en hit 6.3s on its first call vs 770ms on
+            // the second, same audio + same engine in two-run bench).
+            let engine = match stt_config.load_engine() {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("    load failed: {e}");
+                    continue;
+                }
+            };
+            let warmup_audio = vec![0.0f32; 16_000];
+            let warmup_started = Instant::now();
+            match engine.transcribe(&warmup_audio) {
+                Ok(_) => eprintln!(
+                    "    warmup ok ({} ms)",
+                    warmup_started.elapsed().as_millis()
+                ),
+                Err(e) => {
+                    eprintln!("    warmup failed: {e}");
+                    continue;
+                }
+            }
+
             let stt_started = Instant::now();
-            let raw = match stt_config.transcribe(&audio) {
-                Ok(text) => text,
+            let raw = match engine.transcribe(&audio) {
+                Ok(result) => result.text,
                 Err(e) => {
                     eprintln!("    stt failed: {e}");
                     continue;
@@ -211,6 +237,9 @@ fn main() -> Result<()> {
             };
             let stt_ms = stt_started.elapsed().as_millis() as u64;
             eprintln!("    raw ({} ms): {}", stt_ms, preview(&raw, 80));
+            // Drop engine before LLM cleanup loops to free GPU memory
+            // for any subsequent Whisper / Parakeet engine load.
+            drop(engine);
 
             for (style_name, style) in &styles {
                 if matches!(style, Style::Raw) {
@@ -400,6 +429,29 @@ enum SttBuilder {
 
 #[cfg(feature = "real-engines")]
 impl SttConfig {
+    /// Construct the engine once. Caller owns it and runs as many
+    /// transcribe calls as it wants — first throwaway (warmup) so the
+    /// timed pass sees a hot Metal context + loaded model weights;
+    /// subsequent timed call(s) measure decode-only cost. Drop at end
+    /// of config to free GPU memory before the next engine loads.
+    fn load_engine(&self) -> Result<Box<dyn SttEngine + Send>> {
+        match &self.builder {
+            SttBuilder::Whisper(path, name) => {
+                let engine = WhisperSttEngine::from_path(path, name.clone())?;
+                Ok(Box::new(engine))
+            }
+            #[cfg(feature = "parakeet-engine")]
+            SttBuilder::Parakeet(dir) => {
+                let engine = ParakeetSttEngine::from_model_dir(dir)?;
+                Ok(Box::new(engine))
+            }
+        }
+    }
+
+    /// Legacy single-shot path — used in places that don't care about
+    /// warmup (e.g. ad-hoc tests). The bench loop should hold a loaded
+    /// engine across warmup + timed runs instead.
+    #[allow(dead_code)]
     fn transcribe(&self, audio: &[f32]) -> Result<String> {
         match &self.builder {
             SttBuilder::Whisper(path, name) => {
