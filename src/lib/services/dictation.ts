@@ -48,19 +48,19 @@ function createDictationServiceDesktop(): DictationService {
 }
 
 function formatFake(raw: string, style: Style): string {
-  // Mimics the LLM cleanup path — strip filler words + apply style-ish casing.
+  // Mimics the LLM cleanup path — strip filler words + apply structure-ish
+  // shaping. The web fake is just for the UI smoke path; the real engine
+  // does the actual restructuring server-side.
   const cleaned = raw.replace(/\b(uh|um|like|you know|basically)\b\s?/gi, "").trim();
   switch (style) {
     case "raw":
       return raw;
-    case "formal":
+    case "light":
       return capitalize(cleaned) + ".";
-    case "casual":
-      return cleaned.toLowerCase();
-    case "excited":
-      return capitalize(cleaned) + "!";
-    case "very-casual":
-      return cleaned.toLowerCase();
+    case "moderate":
+      return capitalize(cleaned) + ".";
+    case "assertive":
+      return "[fmt] " + capitalize(cleaned) + ".";
     case "captains-log":
       // Web fake doesn't have access to a real cleanup model, so we just
       // bracket the cleaned text with the canonical opener/closer. The

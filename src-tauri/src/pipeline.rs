@@ -109,7 +109,7 @@ mod tests {
             context: &context,
         };
 
-        let outcome = pipeline.dictate_once(Style::Casual, true).unwrap();
+        let outcome = pipeline.dictate_once(Style::Light, true).unwrap();
 
         assert!(!outcome.skipped_llm);
         assert!(!outcome.formatted.contains("uh"));
@@ -133,7 +133,7 @@ mod tests {
             context: &context,
         };
 
-        let outcome = pipeline.dictate_once(Style::Formal, true).unwrap();
+        let outcome = pipeline.dictate_once(Style::Moderate, true).unwrap();
         assert!(outcome.skipped_llm);
         assert_eq!(outcome.formatted, "ok");
     }
@@ -154,7 +154,7 @@ mod tests {
             context: &context,
         };
 
-        let outcome = pipeline.dictate_once(Style::Casual, false).unwrap();
+        let outcome = pipeline.dictate_once(Style::Light, false).unwrap();
         assert!(outcome.skipped_llm);
         assert!(outcome.formatted.contains("uh"));
     }

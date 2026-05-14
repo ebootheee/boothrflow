@@ -27,6 +27,7 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
 use crossbeam_channel::{bounded, Receiver, Sender};

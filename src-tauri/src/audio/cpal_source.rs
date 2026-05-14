@@ -101,7 +101,16 @@ impl AudioSource for CpalAudioSource {
 
         let (frame_tx, frame_rx) = bounded::<AudioFrame>(128);
         let (stop_tx, stop_rx) = bounded::<()>(1);
-        let device_name = self.device_name.lock().clone();
+        // Resolution order:
+        //   1. `set_device(Some(name))` pin (rarely used outside tests).
+        //   2. Settings override (`audio_input_device`).
+        //   3. Bluetooth-aware fallback: if the system default input is a
+        //      Bluetooth mic and the user hasn't disabled the toggle,
+        //      switch to a built-in mic. Avoids the macOS HFP downgrade
+        //      that dims any music playing through the same headphones.
+        //   4. System default.
+        let pinned = self.device_name.lock().clone();
+        let device_name = pinned.or_else(resolve_input_device_from_settings);
 
         thread::Builder::new()
             .name("boothrflow-audio".into())
@@ -132,8 +141,23 @@ fn run_capture(
 ) -> Result<()> {
     let host = cpal::default_host();
 
+    // If a specific device name was requested but isn't available
+    // (unplugged AirPods, settings stale), fall through to system
+    // default rather than failing the dictation outright. The user
+    // gets a working capture; the log line surfaces the fallback so
+    // we can debug if they report unexpected mic.
     let device = match device_name {
-        Some(name) => find_device_by_name(&host, &name)?,
+        Some(name) => match find_device_by_name(&host, &name) {
+            Ok(d) => d,
+            Err(_) => {
+                tracing::warn!(
+                    "audio: requested device {:?} not found — falling back to system default",
+                    name
+                );
+                host.default_input_device()
+                    .ok_or_else(|| BoothError::AudioCapture("no default input device".into()))?
+            }
+        },
         None => host
             .default_input_device()
             .ok_or_else(|| BoothError::AudioCapture("no default input device".into()))?,
@@ -297,4 +321,115 @@ fn find_device_by_name(host: &cpal::Host, name: &str) -> Result<Device> {
     Err(BoothError::AudioCapture(format!(
         "device not found: {name}"
     )))
+}
+
+/// Pick which input device to use given the user's settings. Returns
+/// `Some(name)` to pin a specific device, `None` to fall through to the
+/// system default. See `CpalAudioSource::start` for resolution order.
+fn resolve_input_device_from_settings() -> Option<String> {
+    let s = crate::settings::current_app_settings();
+    let override_name = s.audio_input_device.trim();
+    if !override_name.is_empty() {
+        return Some(override_name.to_string());
+    }
+    if !s.prefer_builtin_mic_with_bluetooth {
+        return None;
+    }
+    pick_builtin_when_default_is_bluetooth()
+}
+
+/// If the system default input device looks like a Bluetooth mic, find
+/// a built-in mic to use instead. Returns `None` when the default is
+/// fine (built-in / wired) or when no built-in alternative exists —
+/// callers fall through to the system default in either case.
+fn pick_builtin_when_default_is_bluetooth() -> Option<String> {
+    let host = cpal::default_host();
+    let default_name = host.default_input_device().and_then(|d| d.name().ok())?;
+    if !is_bluetooth_input(&default_name) {
+        return None;
+    }
+    let devices = host.input_devices().ok()?;
+    for d in devices {
+        let Ok(name) = d.name() else { continue };
+        if is_builtin_input(&name) {
+            tracing::info!(
+                "audio: bluetooth default ({}) → switching to built-in mic ({}) to avoid HFP downgrade",
+                default_name,
+                name
+            );
+            return Some(name);
+        }
+    }
+    tracing::warn!(
+        "audio: bluetooth default ({}) but no built-in mic found — using bluetooth (HFP downgrade expected)",
+        default_name
+    );
+    None
+}
+
+/// Heuristic: does this device name look like a Bluetooth headset/mic?
+/// Matches the common consumer brands plus the generic Bluetooth /
+/// Headset / Headphones tokens. Pure name match — fragile but cheap.
+/// A more rigorous version would query
+/// `kAudioDevicePropertyTransportType` via `coreaudio-sys`, which we
+/// can swap in later if false positives become a problem.
+fn is_bluetooth_input(name: &str) -> bool {
+    let lc = name.to_ascii_lowercase();
+    const NEEDLES: &[&str] = &[
+        "airpods",
+        "beats",
+        "bluetooth",
+        "headset",
+        // Common brands when paired via BT (worth widening as users hit them):
+        "sony wh-",
+        "sony wf-",
+        "bose quietcomfort",
+        "powerbeats",
+    ];
+    NEEDLES.iter().any(|n| lc.contains(n))
+}
+
+/// Heuristic: does this device name look like a built-in MacBook mic?
+/// macOS typically names it "MacBook Pro Microphone" /
+/// "MacBook Air Microphone" / "Built-in Microphone."
+fn is_builtin_input(name: &str) -> bool {
+    let lc = name.to_ascii_lowercase();
+    lc.contains("built-in") || lc.contains("macbook") || lc.contains("internal microphone")
+}
+
+#[cfg(test)]
+mod device_resolution_tests {
+    use super::*;
+
+    #[test]
+    fn classifies_bluetooth_names() {
+        assert!(is_bluetooth_input("AirPods Max"));
+        assert!(is_bluetooth_input("Eric's AirPods Pro"));
+        assert!(is_bluetooth_input("Sony WH-1000XM5"));
+        assert!(is_bluetooth_input("Beats Studio Buds"));
+        assert!(is_bluetooth_input("Bluetooth Headset"));
+        assert!(is_bluetooth_input("Bose QuietComfort 35"));
+    }
+
+    #[test]
+    fn does_not_classify_wired_or_builtin_as_bluetooth() {
+        assert!(!is_bluetooth_input("MacBook Pro Microphone"));
+        assert!(!is_bluetooth_input("Built-in Microphone"));
+        assert!(!is_bluetooth_input("Shure MV7"));
+        assert!(!is_bluetooth_input("USB Audio Device"));
+    }
+
+    #[test]
+    fn classifies_builtin_names() {
+        assert!(is_builtin_input("MacBook Pro Microphone"));
+        assert!(is_builtin_input("MacBook Air Microphone"));
+        assert!(is_builtin_input("Built-in Microphone"));
+    }
+
+    #[test]
+    fn does_not_classify_external_as_builtin() {
+        assert!(!is_builtin_input("AirPods Max"));
+        assert!(!is_builtin_input("USB Audio Device"));
+        assert!(!is_builtin_input("Shure MV7"));
+    }
 }

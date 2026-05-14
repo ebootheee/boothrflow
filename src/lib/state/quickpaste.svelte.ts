@@ -1,6 +1,5 @@
 import { isTauri } from "$lib/services/platform";
-
-type Style = "raw" | "formal" | "casual" | "excited" | "very-casual";
+import type { Style } from "$lib/services/styles";
 
 export type HistoryEntry = {
   id: number;

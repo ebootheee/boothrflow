@@ -28,7 +28,7 @@ fn full_pipeline_runs_with_fakes() {
         context: &context,
     };
 
-    let outcome = pipeline.dictate_once(Style::Casual, true).unwrap();
+    let outcome = pipeline.dictate_once(Style::Light, true).unwrap();
 
     assert!(outcome.duration_ms < 5_000, "fake pipeline must be fast");
     assert!(!outcome.formatted.contains("uh"));
@@ -45,10 +45,9 @@ const RAW_INPUT: &str = "this is another regular test sentence";
 
 #[rstest::rstest]
 #[case(Style::Raw, "this is another regular test sentence")]
-#[case(Style::Formal, "This is another regular test sentence.")]
-#[case(Style::Casual, "this is another regular test sentence")]
-#[case(Style::Excited, "This is another regular test sentence!")]
-#[case(Style::VeryCasual, "this is another regular test sentence")]
+#[case(Style::Light, "This is another regular test sentence.")]
+#[case(Style::Moderate, "This is another regular test sentence.")]
+#[case(Style::Assertive, "[fmt] This is another regular test sentence.")]
 fn style_shapes_output(#[case] style: Style, #[case] expected: &str) {
     let audio = FakeAudioSource::silence(0.5);
     let stt = FakeSttEngine::canned(RAW_INPUT);

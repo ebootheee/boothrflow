@@ -71,6 +71,7 @@ logs/
 
 # Claude / agent local state
 .claude/local/
+.claude/scheduled_tasks.lock
 
 # Codesigning artifacts (NEVER commit private keys)
 *.p12

@@ -4,6 +4,143 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-14 — Windows port buildability + test harness
+
+### Added
+
+- **`pnpm check:windows`** — single entry point that runs the full
+  Windows test battery: type-check, lint, format, cargo fmt + clippy
+  with `real-engines parakeet-engine`, nextest with the same feature
+  set, and the vitest FE suite. Verified green on a clean Win 11 +
+  VS 2022 BuildTools + LLVM + Rust 1.95 install (89 Rust tests pass,
+  7 FE tests pass, no clippy warnings). Docs:
+  [`docs/windows-port.md`](./docs/windows-port.md).
+- **`pnpm check:rust:real`** + **`pnpm test:rust:real:full`** —
+  Windows-friendly variants that wrap cargo via `scripts/cargo-msvc.bat`
+  and target the full `real-engines parakeet-engine` feature surface
+  (the existing `check:rust` / `test:rust` only exercise the
+  `test-fakes` skeleton, so MSVC + libclang + cmake regressions slipped
+  through into the inner-loop tree).
+- **`.gitattributes`** — pins the repo to LF for source files and
+  CRLF for `.bat` / `.cmd` / `.ps1`. cmd.exe silently misparses
+  LF-only batch files (comment leakage, dropped `goto` jumps), which
+  is exactly the failure mode that ate hours debugging the
+  cargo-msvc wrapper. Now enforced by git attribute.
+- **`src-tauri/.cargo/config.toml`** — pins
+  `CMAKE_x86_64-pc-windows-msvc` to VS BuildTools' bundled cmake.exe.
+  pnpm / tauri-cli on Windows sometimes spawn cargo build scripts
+  with a sanitized PATH that drops the vcvars64-added MSVC bin dirs;
+  this bypasses the shell-env chain entirely.
+
+### Fixed
+
+- **`scripts/cargo-msvc.bat` hardening.** Three fixes that together
+  let the wrapper survive a non-VS-dev-shell invocation:
+  - Prepends the shared "Visual Studio Installer" directory to PATH
+    before calling vcvars64.bat, so vcvars's internal `vswhere.exe`
+    call actually resolves (otherwise vcvars prints "Environment
+    initialized" but leaves PATH unchanged).
+  - Pins `CMAKE` to VS's absolute cmake.exe path, with PATH lookup
+    as fallback.
+  - Converts to CRLF + `rem` comments. Same-line-ending guarantee
+    fixes the silent comment-leak bug.
+- **`src-tauri/src/context/real.rs` — `windows` 0.58 API drift.**
+  `K32GetModuleFileNameExW` now takes `HANDLE` + `HMODULE` directly
+  (was `Option<HANDLE>` + `Option<HMODULE>` in 0.57). Without this,
+  Windows clippy fails with `E0271` / `E0277` (`Param<HANDLE>` not
+  satisfied for `Option<HANDLE>`).
+- **`src-tauri/src/hotkey/global.rs`** — `std::time::Duration` import
+  is now `#[cfg(target_os = "macos")]`-gated. Only the macOS
+  hotkey-resync heartbeat uses it; on Windows it's a dead import
+  and clippy with `-D warnings` rejects the build.
+- **`src-tauri/src/tray.rs` — non-macOS tray icon ownership.**
+  `tray_icon` on Windows / Linux now returns an `Image::new_owned`
+  copy of the bytes pulled from `default_window_icon()` instead of
+  `cloned()` on the `&Image<'_>`. The borrow couldn't outlive the
+  AppHandle reference, so clippy refused (lifetime may not live
+  long enough). Also removed the `mut builder` -> shadowed `let
+builder` on the cfg-mac branch.
+- **Prettier CRLF noise on Windows.** `.prettierrc.json` now sets
+  `endOfLine: "auto"`. Without it, every existing CRLF-on-disk file
+  trips `check:format` until the working tree is renormalized — a
+  brittle gate for a project the user wants to keep checking out
+  fresh on both platforms.
+
+### Known limitations
+
+- **`pnpm gen` (binding regen) currently exits with
+  `STATUS_ENTRYPOINT_NOT_FOUND` at startup on Windows.** The example
+  exe builds fine but Windows fails to resolve a DirectML import at
+  load time (`ort-sys` unconditionally links DirectML even though
+  nothing runtime-touches DML). Workaround: regenerate
+  `src/lib/ipc/bindings.ts` on macOS — it's checked in, so this
+  only blocks landing new `#[tauri::command]` handlers from a
+  Windows-only dev box. Fix is queued.
+
+## 2026-05-05 — Wave 6 Phase 0 + small-fixes sweep
+
+### Added
+
+- **Wave 6 Phase 0 — structure-aggressiveness style overhaul** (commit `d71cb90`). New `Style` enum: **Raw / Light / Moderate / Assertive** + Captain's Log retained as orthogonal preset. Replaces the tone-based system (casual / formal / very-casual / excited). Old persisted settings auto-migrate via serde aliases (no manual fix-up needed). New cleanup prompts per level. Settings UI shows a 4-option segmented control with help text per level. Captain's Log under "Fun presets" disclosure. `bench:replay` fans out across all 4 structure styles + raw.
+- **History detail → inline expand-under-row** (commit `60bb2b0`). Old side-by-side detail panel could overflow viewport at narrow widths. Now: click a row, detail expands beneath; click same row to collapse; click another to swap. Caret glyph (▸ / ▾) signals state.
+- **Cleanup chip tok/s fallback** (commit `60bb2b0`). When the LLM backend reports `completion_tokens` + `llm_ms` but skips the explicit `tok_per_sec` field, the FE now derives tok/s from those instead of silently dropping it.
+- **Bluetooth-aware mic default + manual override** (commit `a7302de`). When system default input is a Bluetooth mic (AirPods / Beats / Sony WH/WF / Bose), boothrflow now silently uses the built-in mic instead — avoids the macOS HFP downgrade that dims music for ~30 seconds. New Settings → General → **Microphone** section with a device-picker dropdown + "Use built-in mic when Bluetooth headphones are connected" toggle (default on). User can pin any specific device explicitly via the dropdown to override the auto-pick.
+- **Assertive prompt tightening + small-LLM auto-upgrade** (commit `4ba7e95`). First bench grading exposed three failure modes: invented `### Section` headers when the speaker had no transitions, fake "Hi <name>... Best, [Your Name]" Mail signatures in non-Mail contexts, and "Sure, here is the formatted text:" preambles from qwen 1.5b. New prompt makes every structuring permission CONDITIONAL on its trigger being present (transition cues for headers, listing cues for bullets, Mail-app context for greetings) + explicit anti-pattern bans (no preambles, no `[Your Name]` placeholders, no horizontal rules, no closing summaries). Inline backticks on filenames also banned across Light / Moderate / Assertive — Claude Code's chat input was rewriting `` `devops.md` `` into `[devops.md](http://devops.md)` markdown links on paste.
+- **Auto-upgrade qwen 0.5b/1.5b/3b → 7b for Assertive only** (commit `4ba7e95`). Small models can't follow Assertive's nuanced rules. The user's configured default stays unchanged for the other styles; only Assertive routes through the upgrade. Bench `bench:replay` does NOT upgrade (preserves the 1.5b-on-Assertive variant for grading).
+- **Bench harness warmup pass** (commit `4ba7e95`). `bench:replay` now loads the engine once per config and runs a throwaway 1-second silence pass before timing the real transcription. Without this, first-tested engine paid model load + GPU context init, inflating its `stt_ms` ~10x (whisper-tiny.en went 6.3s → 770ms between two runs of identical audio in the first round).
+
+### Fixed
+
+- **Honest tok/s display** — Cleanup chip now shows tok/s in more cases (any LLM that reports `completion_tokens` will get a derived tok/s, not just ones that ship the explicit field).
+- **Music-dimming on Bluetooth output** — see Bluetooth mic default above. Was a real macOS HFP behavior, not a boothrflow bug, but the default behavior now sidesteps it.
+
+### Changed
+
+- **Settings → General → Style** picker is now a segmented control (4 buttons) rather than a 6-option dropdown. Visual reinforcement of "level" mental model. Help text per option.
+- **Defaults for new installs**: structure-aggressiveness = `Light` (default in the migration map for legacy `casual` / `very-casual` / `excited`). Mic = "Auto" (system default with Bluetooth-aware fallback). Toggle = on.
+
+### Lessons learned (carried into Phase 1+ planning)
+
+- **Bench cold-start ordering bias was real and significant** — first-tested engine ate the model-load cost, looked 10x slower than the others. Phase 3 `bench harness hardening` partially shipped (warmup); N=3 + median + aggregate-leaderboard still pending.
+- **Small LLMs can't follow Assertive's nuanced rules** — qwen 1.5b on long Assertive prompts emits placeholders, fake signatures, preambles. The auto-upgrade is the right pattern; we'll likely need similar guardrails for any future structure-heavy style.
+- **Plain-prose backticks on filenames cause more problems than they solve** — even when the destination renders markdown (Slack, Notion, Obsidian), apps like Claude Code interpret them as auto-link triggers. Plain text is the safe default; code fences for actual code only.
+
+## 2026-05-04 — wave reordering (Wave 6 ↔ 7 swap, Wave 8 added)
+
+### Changed
+
+- **Swapped Wave 6 and Wave 7.** New ordering: **Wave 6 = engine + formatting** (was old Wave 7), **Wave 7 = production polish** (was old Wave 6). Reasoning: dial in the engine and the cleanup pass _before_ packaging it into a signed installer. Better one user (Eric) on a fast iteration loop with the right engine than ten users on a polished installer of a placeholder.
+- **Branch + doc renames** — `feat/wave-7-streaming-stt` → `feat/wave-6-engine-and-formatting`. `docs/waves/wave-7-streaming-stt.md` → `docs/waves/wave-6-engine-and-formatting.md`. `docs/waves/wave-6-production-polish.md` → `docs/waves/wave-7-production-polish.md`.
+
+### Added
+
+- **New Phase 0 in Wave 6: style overhaul.** Replace the tone-based `Style` enum (casual / formal / very-casual / excited / raw / captains-log) with a single **structuring-aggressiveness axis**: raw / light / moderate / assertive. Tone variation turned out to be noise; users actually vary how aggressively the LLM should structure output. `Assertive` adopts Wispr's auto-format playbook (bullets when listing, paragraph breaks at sentence-boundary pauses, code fences for "in code" cues, greeting + sign-off when focused app is Mail). Captain's Log retained as an orthogonal fun preset. Day-one work, testable immediately.
+- **New Wave 8 — Connectors + UI rebuild + privacy audit.** Pulls forward three items from Future Ideas into a dedicated wave: (1) Connector trait + Obsidian vault push + custom HTTP webhook + Slack incoming webhooks + voice-triggered routing + History row push action; (2) hyper-modern UI rebuild (visual language refresh, pill redesign, Liquid Glass / NSVisualEffectView vibrancy on macOS, Cmd-K command palette, keyboard shortcuts); (3) `PRIVACY_AUDIT.md` with pre-written AI-assistant verification prompt + default-features checklist + BYOK callouts + telemetry confirmation + pass/fail table. Plan: [`docs/waves/wave-8-connectors-ui-privacy.md`](./docs/waves/wave-8-connectors-ui-privacy.md).
+
+### Removed
+
+- **From "Future Ideas":** Connectors section, Hyper-modern UI rebuild section, Privacy audit doc section (all promoted to Wave 8). "Parakeet → default engine" candidate (already done — landed as part of the Wave 5 → main merge).
+
+## 2026-05-04 (Wave 5 → main, Wave 7 plan)
+
+### Added
+
+- **Wave 5 merged to main** (`feat/wave-5` → `main` via `--no-ff`, commit `763d370`). 20 commits covering context-aware cleanup, Parakeet TDT 0.6B v2 engine, post-paste learning coordinator, macOS Vision OCR, focused-AX read, captures-to-disk, bench replay tool, in-app grading UI.
+- **Developer mode flag (`BOOTHRFLOW_DEV=1`)** replaces `BOOTHRFLOW_SAVE_CAPTURES`. Single umbrella that gates capture saving + Benchmarks tab visibility + future dev-only surfaces. Production builds default the tab off; devs flip the env var to unlock.
+- **Multi-LLM bench fan-out.** `bench:replay` now iterates across qwen2.5:7b + qwen2.5:1.5b (configurable list) instead of just the user's currently-configured model. Raw style emits one variant per STT (no LLM dependency) instead of one per (STT × LLM).
+- **Wave 7 plan committed** — [`docs/waves/wave-7-streaming-stt.md`](./docs/waves/wave-7-streaming-stt.md). Two parallel tracks targeting the streaming + cold-start gaps offline Parakeet exposed: Phase 1 Nemotron Speech Streaming via sherpa-onnx (3-5d), Phase 2 parakeet.cpp evaluation on Apple Silicon (2-3d), Phase 3 bench harness hardening — warmup pass + N=3 median (1d). Default STT for production gets re-decided from leaderboard grades after both phases land.
+
+### Changed
+
+- **Defaults: Parakeet TDT 0.6B v2 + qwen2.5:7b for production builds.** Inner-loop dev (no `parakeet-engine` feature) still defaults to whisper tiny.en so the dev loop stays light. Driven by Wave 5 bench results: on a 116s Lysara dictation, Parakeet was the only engine that got the named entity right and avoided "paste" → "pay" semantic substitution.
+
+### First-run benchmark findings (Lysara capture, 116s)
+
+- whisper:tiny.en → "LISAR", "pay" (semantically wrong); STT 770ms (post-warmup); LLM 7b 8.8s, 1.5b 3.1s.
+- whisper:base.en → "Lysara" ✓, "pay" (still wrong); STT 851ms; LLM 7b 4.0s, 1.5b 1.5s.
+- parakeet:0.6b-v2-int8 → all entities + verbs correct; STT 13.5s (load + decode, consistent across runs); LLM 7b 4.2s, 1.5b 1.4s.
+- qwen2.5:1.5b is ~3× faster than 7b across every variant but **dropped trailing content** on the parakeet+1.5b cleanup (cut last sentence + middle phrase). Suggests a "1.5b for short utterances, 7b for long" heuristic for a future setting.
+
 ## 2026-05-03 (planning)
 
 ### Added

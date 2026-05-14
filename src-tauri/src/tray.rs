@@ -43,7 +43,7 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
         icon.height()
     );
 
-    let mut builder = TrayIconBuilder::with_id("boothrflow-tray")
+    let builder = TrayIconBuilder::with_id("boothrflow-tray")
         .icon(icon)
         .tooltip(format!(
             "boothrflow — idle ({} to dictate)",
@@ -99,13 +99,11 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
             }
         });
 
+    // Use the actual app icon, not template mode. The status item needs
+    // to be icon-only, and template-rendering the colored app icon turns
+    // its mostly-opaque square background into a blank-looking block.
     #[cfg(target_os = "macos")]
-    {
-        // Use the actual app icon, not template mode. The status item needs
-        // to be icon-only, and template-rendering the colored app icon turns
-        // its mostly-opaque square background into a blank-looking block.
-        builder = builder.icon_as_template(false);
-    }
+    let builder = builder.icon_as_template(false);
 
     builder
         .build(app)
@@ -152,9 +150,14 @@ fn macos_app_icon() -> Result<Image<'static>> {
 
 #[cfg(not(target_os = "macos"))]
 fn tray_icon(app: &AppHandle) -> Result<Image<'static>> {
-    app.default_window_icon()
-        .ok_or_else(|| BoothError::internal("no default window icon"))
-        .cloned()
+    let icon = app
+        .default_window_icon()
+        .ok_or_else(|| BoothError::internal("no default window icon"))?;
+    Ok(Image::new_owned(
+        icon.rgba().to_vec(),
+        icon.width(),
+        icon.height(),
+    ))
 }
 
 #[cfg(target_os = "macos")]

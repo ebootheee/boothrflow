@@ -448,10 +448,9 @@ fn default_db_path() -> Option<PathBuf> {
 fn style_str(s: &Style) -> &'static str {
     match s {
         Style::Raw => "raw",
-        Style::Formal => "formal",
-        Style::Casual => "casual",
-        Style::Excited => "excited",
-        Style::VeryCasual => "very-casual",
+        Style::Light => "light",
+        Style::Moderate => "moderate",
+        Style::Assertive => "assertive",
         Style::CaptainsLog => "captains-log",
     }
 }
@@ -459,11 +458,16 @@ fn style_str(s: &Style) -> &'static str {
 fn parse_style(s: &str) -> Style {
     match s {
         "raw" => Style::Raw,
-        "formal" => Style::Formal,
-        "excited" => Style::Excited,
-        "very-casual" => Style::VeryCasual,
+        // Legacy values from before the Wave 6 styles overhaul. Map them
+        // forward so old history rows display under their new bucket
+        // rather than falling into the default and losing the user's
+        // original intent.
+        "moderate" | "formal" => Style::Moderate,
+        "assertive" => Style::Assertive,
         "captains-log" => Style::CaptainsLog,
-        _ => Style::Casual,
+        // Light is the default + soaks up the legacy Casual / VeryCasual
+        // / Excited tone variants.
+        _ => Style::Light,
     }
 }
 

@@ -3,8 +3,8 @@ import { isErr, isOk } from "wellcrafted/result";
 import { dictationService } from "./dictation";
 
 describe("dictationService (web fake)", () => {
-  it("returns Ok with stripped fillers when style=casual", async () => {
-    const result = await dictationService.dictateOnce({ style: "casual" });
+  it("returns Ok with stripped fillers when style=light", async () => {
+    const result = await dictationService.dictateOnce({ style: "light" });
     expect(isOk(result)).toBe(true);
     if (isErr(result)) return;
     expect(result.data.formatted).not.toMatch(/\buh\b/i);
@@ -19,17 +19,17 @@ describe("dictationService (web fake)", () => {
     expect(result.data.formatted).toBe(result.data.raw);
   });
 
-  it("ends formal output with a period", async () => {
-    const result = await dictationService.dictateOnce({ style: "formal" });
+  it("ends light output with a period", async () => {
+    const result = await dictationService.dictateOnce({ style: "light" });
     expect(isOk(result)).toBe(true);
     if (isErr(result)) return;
     expect(result.data.formatted.endsWith(".")).toBe(true);
   });
 
-  it("ends excited output with an exclamation", async () => {
-    const result = await dictationService.dictateOnce({ style: "excited" });
+  it("marks assertive output with [fmt]", async () => {
+    const result = await dictationService.dictateOnce({ style: "assertive" });
     expect(isOk(result)).toBe(true);
     if (isErr(result)) return;
-    expect(result.data.formatted.endsWith("!")).toBe(true);
+    expect(result.data.formatted.startsWith("[fmt]")).toBe(true);
   });
 });
