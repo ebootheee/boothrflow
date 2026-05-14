@@ -1,0 +1,24 @@
+# Per-package cargo config. Applies to every cargo invocation under
+# src-tauri/, no matter who launched it (developer shell, pnpm, tauri-cli,
+# CI). The settings here exist to flip on the Windows MSVC + bindgen +
+# cmake toolchain even when the upstream caller has sanitized PATH.
+
+[env]
+# whisper-rs-sys and sherpa-rs-sys both build their C/C++ code through
+# the `cmake` crate, which does this lookup order:
+#
+#   1. CMAKE_<target_triple>     (most specific)
+#   2. CMAKE                     (any target)
+#   3. find_cmake_executable()   (auto-detect via VS devenv.exe)
+#   4. literal "cmake" on PATH   (last resort)
+#
+# Step 3 only succeeds with VS Community/Pro/Enterprise — BuildTools
+# does NOT ship `devenv.exe`, so the auto-detect returns None. Step 4
+# fails because pnpm + tauri-cli on Windows spawn cargo's build script
+# with a sanitized PATH that drops the vcvars64-added MSVC bin dirs.
+#
+# Pinning CMAKE_<triple> here cuts straight to the bundled-with-MSVC
+# cmake.exe and bypasses the entire shell-env propagation chain. The
+# var only matters for the windows-msvc target so cross-builds and
+# macOS / Linux builds ignore it.
+CMAKE_x86_64-pc-windows-msvc = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe"

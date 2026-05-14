@@ -203,6 +203,8 @@ scripts\cargo-msvc.bat pnpm exec tauri dev
 
 `pnpm dev:msvc`, `pnpm build:msvc`, `pnpm test:rust:real` use the wrapper. The fast inner-loop fakes-only path (`pnpm test:rust`, `pnpm test:fe`) works in any shell because `test-fakes` doesn't compile the heavy native deps.
 
+**Pre-commit / pre-PR Windows check**: `pnpm check:windows` runs the whole battery (types + lint + format + cargo fmt + clippy + nextest with `real-engines parakeet-engine` + FE vitest) through the wrapper. Details and the small set of Windows-only fixes the harness catches: [`docs/windows-port.md`](./docs/windows-port.md).
+
 ### macOS
 
 Install Xcode Command Line Tools, `cmake`, and Ollama:

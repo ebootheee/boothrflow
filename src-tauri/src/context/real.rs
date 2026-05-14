@@ -74,7 +74,7 @@ fn detect_platform() -> Option<AppContext> {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
     use std::path::PathBuf;
-    use windows::Win32::Foundation::{CloseHandle, HWND, MAX_PATH};
+    use windows::Win32::Foundation::{CloseHandle, HMODULE, MAX_PATH};
     use windows::Win32::System::ProcessStatus::K32GetModuleFileNameExW;
     use windows::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
@@ -110,7 +110,7 @@ fn detect_platform() -> Option<AppContext> {
         let access = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ;
         let handle = OpenProcess(access, false, pid).ok()?;
         let mut buf = vec![0u16; MAX_PATH as usize];
-        let copied = K32GetModuleFileNameExW(Some(handle), None, &mut buf) as usize;
+        let copied = K32GetModuleFileNameExW(handle, HMODULE::default(), &mut buf) as usize;
         let _ = CloseHandle(handle);
         if copied == 0 {
             return None;

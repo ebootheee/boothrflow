@@ -4,6 +4,79 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-14 — Windows port buildability + test harness
+
+### Added
+
+- **`pnpm check:windows`** — single entry point that runs the full
+  Windows test battery: type-check, lint, format, cargo fmt + clippy
+  with `real-engines parakeet-engine`, nextest with the same feature
+  set, and the vitest FE suite. Verified green on a clean Win 11 +
+  VS 2022 BuildTools + LLVM + Rust 1.95 install (89 Rust tests pass,
+  7 FE tests pass, no clippy warnings). Docs:
+  [`docs/windows-port.md`](./docs/windows-port.md).
+- **`pnpm check:rust:real`** + **`pnpm test:rust:real:full`** —
+  Windows-friendly variants that wrap cargo via `scripts/cargo-msvc.bat`
+  and target the full `real-engines parakeet-engine` feature surface
+  (the existing `check:rust` / `test:rust` only exercise the
+  `test-fakes` skeleton, so MSVC + libclang + cmake regressions slipped
+  through into the inner-loop tree).
+- **`.gitattributes`** — pins the repo to LF for source files and
+  CRLF for `.bat` / `.cmd` / `.ps1`. cmd.exe silently misparses
+  LF-only batch files (comment leakage, dropped `goto` jumps), which
+  is exactly the failure mode that ate hours debugging the
+  cargo-msvc wrapper. Now enforced by git attribute.
+- **`src-tauri/.cargo/config.toml`** — pins
+  `CMAKE_x86_64-pc-windows-msvc` to VS BuildTools' bundled cmake.exe.
+  pnpm / tauri-cli on Windows sometimes spawn cargo build scripts
+  with a sanitized PATH that drops the vcvars64-added MSVC bin dirs;
+  this bypasses the shell-env chain entirely.
+
+### Fixed
+
+- **`scripts/cargo-msvc.bat` hardening.** Three fixes that together
+  let the wrapper survive a non-VS-dev-shell invocation:
+  - Prepends the shared "Visual Studio Installer" directory to PATH
+    before calling vcvars64.bat, so vcvars's internal `vswhere.exe`
+    call actually resolves (otherwise vcvars prints "Environment
+    initialized" but leaves PATH unchanged).
+  - Pins `CMAKE` to VS's absolute cmake.exe path, with PATH lookup
+    as fallback.
+  - Converts to CRLF + `rem` comments. Same-line-ending guarantee
+    fixes the silent comment-leak bug.
+- **`src-tauri/src/context/real.rs` — `windows` 0.58 API drift.**
+  `K32GetModuleFileNameExW` now takes `HANDLE` + `HMODULE` directly
+  (was `Option<HANDLE>` + `Option<HMODULE>` in 0.57). Without this,
+  Windows clippy fails with `E0271` / `E0277` (`Param<HANDLE>` not
+  satisfied for `Option<HANDLE>`).
+- **`src-tauri/src/hotkey/global.rs`** — `std::time::Duration` import
+  is now `#[cfg(target_os = "macos")]`-gated. Only the macOS
+  hotkey-resync heartbeat uses it; on Windows it's a dead import
+  and clippy with `-D warnings` rejects the build.
+- **`src-tauri/src/tray.rs` — non-macOS tray icon ownership.**
+  `tray_icon` on Windows / Linux now returns an `Image::new_owned`
+  copy of the bytes pulled from `default_window_icon()` instead of
+  `cloned()` on the `&Image<'_>`. The borrow couldn't outlive the
+  AppHandle reference, so clippy refused (lifetime may not live
+  long enough). Also removed the `mut builder` -> shadowed `let
+builder` on the cfg-mac branch.
+- **Prettier CRLF noise on Windows.** `.prettierrc.json` now sets
+  `endOfLine: "auto"`. Without it, every existing CRLF-on-disk file
+  trips `check:format` until the working tree is renormalized — a
+  brittle gate for a project the user wants to keep checking out
+  fresh on both platforms.
+
+### Known limitations
+
+- **`pnpm gen` (binding regen) currently exits with
+  `STATUS_ENTRYPOINT_NOT_FOUND` at startup on Windows.** The example
+  exe builds fine but Windows fails to resolve a DirectML import at
+  load time (`ort-sys` unconditionally links DirectML even though
+  nothing runtime-touches DML). Workaround: regenerate
+  `src/lib/ipc/bindings.ts` on macOS — it's checked in, so this
+  only blocks landing new `#[tauri::command]` handlers from a
+  Windows-only dev box. Fix is queued.
+
 ## 2026-05-05 — Wave 6 Phase 0 + small-fixes sweep
 
 ### Added

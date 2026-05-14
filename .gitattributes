@@ -1,0 +1,37 @@
+# Default: let git decide (autocrlf-friendly).
+* text=auto
+
+# Windows shell scripts MUST be CRLF. cmd.exe silently misparses LF-only
+# .bat files in unpredictable ways -- comments leak as commands, `goto`
+# jumps fall through, and downstream "program not found" errors get
+# blamed on tools that are perfectly installed. See scripts/cargo-msvc.bat
+# header for one such incident.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# POSIX shell scripts MUST be LF. CRLF breaks the shebang parser and
+# heredocs.
+*.sh text eol=lf
+
+# Rust / TS / Markdown: leave to autocrlf, but keep a stable on-disk
+# representation in the repo (LF) regardless of platform.
+*.rs    text eol=lf
+*.toml  text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.svelte text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Binary assets stay binary.
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.bin binary
+*.onnx binary
+*.wav binary
