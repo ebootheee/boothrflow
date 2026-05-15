@@ -43,6 +43,7 @@ pub fn create_tray(app: &AppHandle) -> Result<()> {
         icon.height()
     );
 
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut builder = TrayIconBuilder::with_id("boothrflow-tray")
         .icon(icon)
         .tooltip(format!(
@@ -153,8 +154,9 @@ fn macos_app_icon() -> Result<Image<'static>> {
 #[cfg(not(target_os = "macos"))]
 fn tray_icon(app: &AppHandle) -> Result<Image<'static>> {
     app.default_window_icon()
-        .ok_or_else(|| BoothError::internal("no default window icon"))
         .cloned()
+        .ok_or_else(|| BoothError::internal("no default window icon"))
+        .map(|img| img.to_owned())
 }
 
 #[cfg(target_os = "macos")]

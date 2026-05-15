@@ -200,19 +200,6 @@ pub fn run() {
                 tracing::info!("tray: created — look for the boothrflow icon in the menu bar");
             }
 
-            // macOS: switch to a menu-bar-only "accessory" app. Drops the
-            // dock icon entirely, removes the app from Cmd-Tab, and gives
-            // us a single clean entry point through the tray icon. We create
-            // the NSStatusItem first, then switch the activation policy, so
-            // AppKit has already attached the menu-bar item before the app
-            // becomes accessory-only. The final runtime behavior remains
-            // menu-bar-only in both `tauri dev` and bundled builds.
-            #[cfg(target_os = "macos")]
-            {
-                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-                tracing::info!("macos: activation policy set to Accessory");
-            }
-
             // Pre-warm the listen-pill overlay so first-press latency is low.
             if let Err(e) = overlay::create_pill_window(&handle) {
                 tracing::warn!("could not create listen-pill window: {e}");
@@ -247,6 +234,20 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, _event| {
+            // macOS Dock click on an app with no visible windows fires Reopen.
+            // Restore the main window so left-clicking the Dock icon is a
+            // reliable way back in — backstop for when the menu-bar tray icon
+            // is hidden behind the camera notch on 14"/16" MBP and M2+ MBA.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                if let Some(window) = _app_handle.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }
