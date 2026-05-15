@@ -41,17 +41,16 @@ pub enum Style {
     #[default]
     #[serde(alias = "casual", alias = "very-casual", alias = "excited")]
     Light = 1,
-    /// Light cleanup *plus* paragraph splits at natural breaks; removes
-    /// filler ("um," "you know," repeated false starts). Formal users
-    /// land here because their preference reads as "more cleaned up,"
-    /// not "different tone."
-    #[serde(alias = "formal")]
+    /// Format-only: paragraph splits at natural breaks, bullets when the
+    /// speaker explicitly enumerates, code fences when the speaker says
+    /// "in code." Hard-rules out paraphrasing, reordering, content
+    /// invention, and executing meta-instructions. The legacy "formal"
+    /// label and the (since-removed) Wave-6 "assertive" variant both
+    /// migrate here — Assertive's full-rewrite freedom turned out to
+    /// hallucinate paragraphs of fake portfolio-company content (see
+    /// CHANGELOG 2026-05-10).
+    #[serde(alias = "formal", alias = "assertive")]
     Moderate = 2,
-    /// LLM has full freedom to restructure: bullets when listing,
-    /// paragraph breaks at sentence-boundary pauses, code fences for
-    /// "in code" cues, greeting + signature when focused app is Mail.
-    /// Long brain dumps come back as memos. New variant — no alias.
-    Assertive = 3,
     /// Star-Trek-style log entry. Computed stardate prefix + formal
     /// 24th-century rewrite. Orthogonal to the structure axis — kept
     /// as a fun preset.
@@ -61,15 +60,14 @@ pub enum Style {
 impl Style {
     /// How aggressively the cleanup pass should rewrite the raw transcript.
     /// `0` preserves every word verbatim; `1` drops disfluencies and
-    /// self-corrections; `2` allows paragraph restructuring;
-    /// `3` allows full structural rewrite (bullets, headers, signatures).
-    /// Captain's Log stays at 1 since paraphrase risks hallucinating canon.
+    /// self-corrections; `2` adds paragraph breaks + conditional bullets/
+    /// code fences. Captain's Log stays at 1 since paraphrase risks
+    /// hallucinating canon.
     pub fn aggressiveness(&self) -> u8 {
         match self {
             Self::Raw => 0,
             Self::Light | Self::CaptainsLog => 1,
             Self::Moderate => 2,
-            Self::Assertive => 3,
         }
     }
 }
@@ -624,7 +622,7 @@ pub fn whisper_models() -> Vec<WhisperModel> {
             file: "parakeet-tdt-0.6b-v3",
             available: cfg!(feature = "parakeet-engine"),
             label: "NVIDIA Parakeet TDT 0.6B — final transcript only (preview)",
-            detail: "Highest accuracy on technical jargon (Qwen, OpenAI, file paths, etc). No live preview while talking — transcript appears on release. English only.",
+            detail: "Faster than Whisper but trips on pronouns and short function words on multi-sentence dictations. No live preview while talking. English only.",
             download_arg: "parakeet",
         },
     ]
@@ -775,6 +773,33 @@ fn migrate(mut settings: AppSettings) -> AppSettings {
     }
     settings.whisper.model = normalize_whisper_model(&settings.whisper.model);
 
+    // If the persisted STT model isn't available in this build (e.g. the
+    // user previously ran `pnpm dev:parakeet` and selected Parakeet, then
+    // restarted with plain `pnpm dev` which doesn't compile the
+    // `parakeet-engine` feature), fall back to the current default
+    // instead of hard-failing setup. Without this the daemon refuses to
+    // start until the JSON is hand-edited. Logged at info so the swap is
+    // discoverable.
+    if let Some(model) = whisper_model_for(&settings.whisper.model) {
+        if !model.available {
+            let fallback = default_whisper_model();
+            tracing::info!(
+                "settings: persisted STT model `{}` is not available in this build; falling back to `{}`",
+                settings.whisper.model,
+                fallback
+            );
+            settings.whisper.model = fallback;
+        }
+    } else {
+        let fallback = default_whisper_model();
+        tracing::info!(
+            "settings: persisted STT model `{}` unrecognized; falling back to `{}`",
+            settings.whisper.model,
+            fallback
+        );
+        settings.whisper.model = fallback;
+    }
+
     // Wave 5e: the legacy quick-paste default `Option + Cmd + H` collides
     // with macOS's system-wide `Cmd + H` "hide app" shortcut. AppKit
     // intercepts before our rdev listener sees the keypress, hiding
@@ -836,19 +861,13 @@ fn default_whisper_model() -> String {
     if let Ok(file) = std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE") {
         return normalize_whisper_model(&file);
     }
-    // Production builds enable `parakeet-engine` and ship the Parakeet
-    // TDT 0.6B model — best transcription quality on our benchmarks
-    // (named entities, semantic stability) at the cost of higher first-token
-    // latency. Inner-loop dev builds (no parakeet-engine) fall back to
-    // tiny.en so the dev loop stays light.
-    #[cfg(feature = "parakeet-engine")]
-    {
-        "parakeet-tdt-0.6b-v3".into()
-    }
-    #[cfg(not(feature = "parakeet-engine"))]
-    {
-        "tiny.en".into()
-    }
+    // Whisper base.en is the default. Parakeet TDT 0.6B is faster but
+    // makes substantive pronoun errors on multi-sentence dictations
+    // ("he did well" → "you did well") that whisper-base catches every
+    // time. Speed delta is small enough on the typical <60s utterance
+    // that accuracy wins. Parakeet is still selectable in Settings for
+    // users who want the throughput on shorter, more constrained input.
+    "base.en".into()
 }
 
 fn default_ptt_hotkey() -> String {
@@ -938,6 +957,30 @@ mod tests {
             ..HotkeySettings::default()
         };
         validate_hotkey_bindings(&hotkeys).unwrap();
+    }
+
+    // The Parakeet picker entry is `available: false` unless the crate
+    // is compiled with `parakeet-engine`, so this test only makes sense
+    // when that feature is off (which is the default test config). Gate
+    // by cfg rather than runtime-skip so the test name accurately
+    // reports what's covered for any given feature combination.
+    #[cfg(not(feature = "parakeet-engine"))]
+    #[test]
+    fn migrate_falls_back_when_persisted_model_unavailable() {
+        let mut settings = AppSettings::default();
+        settings.whisper.model = "parakeet-tdt-0.6b-v3".into();
+        let migrated = migrate(settings);
+        assert_eq!(migrated.whisper.model, default_whisper_model());
+        validate_settings(&migrated).expect("migrated settings should validate");
+    }
+
+    #[test]
+    fn migrate_falls_back_when_persisted_model_unrecognized() {
+        let mut settings = AppSettings::default();
+        settings.whisper.model = "some-future-model-name".into();
+        let migrated = migrate(settings);
+        assert_eq!(migrated.whisper.model, default_whisper_model());
+        validate_settings(&migrated).expect("migrated settings should validate");
     }
 
     #[test]

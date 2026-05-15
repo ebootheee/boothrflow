@@ -46,8 +46,7 @@ const RAW_INPUT: &str = "this is another regular test sentence";
 #[rstest::rstest]
 #[case(Style::Raw, "this is another regular test sentence")]
 #[case(Style::Light, "This is another regular test sentence.")]
-#[case(Style::Moderate, "This is another regular test sentence.")]
-#[case(Style::Assertive, "[fmt] This is another regular test sentence.")]
+#[case(Style::Moderate, "[fmt] This is another regular test sentence.")]
 fn style_shapes_output(#[case] style: Style, #[case] expected: &str) {
     let audio = FakeAudioSource::silence(0.5);
     let stt = FakeSttEngine::canned(RAW_INPUT);

@@ -10,6 +10,7 @@
     toggleDictationHotkeyLabel,
   } from "$lib/services/platform";
   import type { Style } from "$lib/services/styles";
+  import { wordDiff } from "$lib/services/word-diff";
   import { dictationStore } from "$lib/state/dictation.svelte";
   import {
     settings,
@@ -85,14 +86,7 @@
       label: "Moderate",
       icon: "book",
       detail:
-        "Light cleanup plus paragraph splits at natural breaks; removes filler words and false starts.",
-    },
-    {
-      value: "assertive",
-      label: "Assertive",
-      icon: "sparkles",
-      detail:
-        "LLM has full freedom: bullets when listing, paragraph breaks, code fences, greeting + sign-off in Mail context.",
+        "Format-only: paragraph breaks at natural pauses, bullets when you explicitly list items, code fences when you say “in code.” Never paraphrases or invents content.",
     },
     {
       value: "captains-log",
@@ -1638,10 +1632,21 @@
                                   <span>Raw</span>
                                   <textarea readonly rows="2" value={v.raw}></textarea>
                                 </label>
-                                <label>
-                                  <span>Formatted</span>
-                                  <textarea readonly rows="3" value={v.formatted}></textarea>
-                                </label>
+                                <div class="variant-diff">
+                                  <span class="variant-diff-label">
+                                    Formatted
+                                    <small
+                                      >highlighted = words not in raw (likely added by LLM)</small
+                                    >
+                                  </span>
+                                  <p class="variant-diff-body">
+                                    {#each wordDiff(v.raw, v.formatted) as seg, segIdx (segIdx)}
+                                      {#if seg.added}<mark class="variant-diff-added"
+                                          >{seg.text}</mark
+                                        >{:else}{seg.text}{/if}
+                                    {/each}
+                                  </p>
+                                </div>
                               </div>
                               <div class="variant-grade">
                                 <span class="variant-grade-label">Grade</span>

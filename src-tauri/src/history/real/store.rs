@@ -450,7 +450,6 @@ fn style_str(s: &Style) -> &'static str {
         Style::Raw => "raw",
         Style::Light => "light",
         Style::Moderate => "moderate",
-        Style::Assertive => "assertive",
         Style::CaptainsLog => "captains-log",
     }
 }
@@ -461,9 +460,10 @@ fn parse_style(s: &str) -> Style {
         // Legacy values from before the Wave 6 styles overhaul. Map them
         // forward so old history rows display under their new bucket
         // rather than falling into the default and losing the user's
-        // original intent.
-        "moderate" | "formal" => Style::Moderate,
-        "assertive" => Style::Assertive,
+        // original intent. "assertive" was removed on 2026-05-10 after
+        // bench grading showed it hallucinated content; old rows roll
+        // up into Moderate.
+        "moderate" | "formal" | "assertive" => Style::Moderate,
         "captains-log" => Style::CaptainsLog,
         // Light is the default + soaks up the legacy Casual / VeryCasual
         // / Excited tone variants.

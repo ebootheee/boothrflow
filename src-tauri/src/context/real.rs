@@ -5,38 +5,69 @@
 //!
 //! Per-platform:
 //! - macOS: `NSWorkspace::frontmostApplication()` for the app, falling
-//!   back to localized name when the bundle ID is unavailable. Window
-//!   title is intentionally not pulled here — that requires the
-//!   Accessibility API (AXUIElement) which adds two tiers of API
-//!   surface and is best done via a dedicated helper if/when we need
-//!   the per-window granularity.
+//!   back to localized name when the bundle ID is unavailable. The
+//!   call is dispatched onto the main thread via
+//!   `AppHandle::run_on_main_thread` because NSWorkspace is documented
+//!   main-thread-only and macOS 15+ raises `NSException` when called
+//!   from a background thread — that exception is foreign to Rust's
+//!   unwinder and aborts the process. Window title is intentionally
+//!   not pulled here — that requires the Accessibility API
+//!   (AXUIElement) which adds two tiers of API surface and is best
+//!   done via a dedicated helper if/when we need the per-window
+//!   granularity.
 //! - Windows: `GetForegroundWindow` + `GetWindowText` + a process
 //!   query to recover the executable name. Returns lowercase exe
 //!   filename to match the existing `slack.exe` / `code.exe` shape
 //!   the cleanup prompt expects.
 //! - Linux: stub (Wave 4 port).
 
+use tauri::AppHandle;
+
 use crate::context::{AppContext, ContextDetector};
 
-/// Production foreground-app detector. Stateless; cheap to call (a few
-/// syscalls on the platform-native side).
-#[derive(Debug, Default, Clone, Copy)]
-pub struct RealContextDetector;
+/// Upper bound for the main-thread RPC on macOS. The actual closure is
+/// a couple of syscalls (microseconds); 500 ms is a generous ceiling
+/// so a momentarily-busy main thread degrades to "no app context this
+/// dictation" rather than hanging the session loop.
+#[cfg(target_os = "macos")]
+const MAIN_THREAD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Production foreground-app detector. Holds an `AppHandle` so macOS
+/// callers can dispatch NSWorkspace queries onto the main thread; the
+/// other platforms ignore it.
+#[derive(Clone)]
+pub struct RealContextDetector {
+    app: AppHandle,
+}
 
 impl RealContextDetector {
-    pub fn new() -> Self {
-        Self
+    pub fn new(app: AppHandle) -> Self {
+        Self { app }
     }
 }
 
 impl ContextDetector for RealContextDetector {
     fn detect(&self) -> Option<AppContext> {
-        detect_platform()
+        detect_platform(&self.app)
     }
 }
 
 #[cfg(target_os = "macos")]
-fn detect_platform() -> Option<AppContext> {
+fn detect_platform(app: &AppHandle) -> Option<AppContext> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    if app
+        .run_on_main_thread(move || {
+            let _ = tx.send(detect_macos_inner());
+        })
+        .is_err()
+    {
+        return None;
+    }
+    rx.recv_timeout(MAIN_THREAD_TIMEOUT).ok().flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn detect_macos_inner() -> Option<AppContext> {
     use objc2_app_kit::NSWorkspace;
 
     let workspace = NSWorkspace::sharedWorkspace();
@@ -70,7 +101,7 @@ fn detect_platform() -> Option<AppContext> {
 }
 
 #[cfg(windows)]
-fn detect_platform() -> Option<AppContext> {
+fn detect_platform(_app: &AppHandle) -> Option<AppContext> {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
     use std::path::PathBuf;
@@ -141,7 +172,7 @@ fn detect_platform() -> Option<AppContext> {
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
-fn detect_platform() -> Option<AppContext> {
+fn detect_platform(_app: &AppHandle) -> Option<AppContext> {
     // Linux: requires X11 / Wayland-specific code. Wave 4.
     None
 }

@@ -355,19 +355,16 @@ export type Style =
  */
 "light" | 
 /**
- *  Light cleanup *plus* paragraph splits at natural breaks; removes
- *  filler ("um," "you know," repeated false starts). Formal users
- *  land here because their preference reads as "more cleaned up,"
- *  not "different tone."
+ *  Format-only: paragraph splits at natural breaks, bullets when the
+ *  speaker explicitly enumerates, code fences when the speaker says
+ *  "in code." Hard-rules out paraphrasing, reordering, content
+ *  invention, and executing meta-instructions. The legacy "formal"
+ *  label and the (since-removed) Wave-6 "assertive" variant both
+ *  migrate here — Assertive's full-rewrite freedom turned out to
+ *  hallucinate paragraphs of fake portfolio-company content (see
+ *  CHANGELOG 2026-05-10).
  */
 "moderate" | 
-/**
- *  LLM has full freedom to restructure: bullets when listing,
- *  paragraph breaks at sentence-boundary pauses, code fences for
- *  "in code" cues, greeting + signature when focused app is Mail.
- *  Long brain dumps come back as memos. New variant — no alias.
- */
-"assertive" | 
 /**
  *  Star-Trek-style log entry. Computed stardate prefix + formal
  *  24th-century rewrite. Orthogonal to the structure axis — kept

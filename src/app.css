@@ -1100,6 +1100,49 @@ button.bench-row.selected {
   padding: 5px 7px;
 }
 
+.variant-diff {
+  display: grid;
+  gap: 2px;
+}
+
+.variant-diff-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.variant-diff-label small {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+  color: var(--subtle);
+}
+
+.variant-diff-body {
+  margin: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 5px 7px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.variant-diff-added {
+  background: #fff3c4;
+  color: #6b4f00;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .variant-grade {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

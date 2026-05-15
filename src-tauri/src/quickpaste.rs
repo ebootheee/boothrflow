@@ -11,12 +11,27 @@
 //! Cross-platform: the focus-snapshot is Windows-only for v0; macOS/Linux
 //! uses `NSWorkspace.frontmostApplication` / `NSRunningApplication.activate`.
 //! Linux remains a no-op until its own port.
+//!
+//! macOS thread affinity: the NSWorkspace / NSRunningApplication calls
+//! must run on the main thread. The hotkey daemon and the
+//! `quickpaste_paste` Tauri command both fire from background threads,
+//! so capture / restore dispatch onto the main thread via
+//! `AppHandle::run_on_main_thread` and block the caller on a oneshot.
+//! macOS 15+ raises `NSException` when these are called off-main, and
+//! Obj-C exceptions are foreign to Rust's unwinder — they abort instead
+//! of unwinding. Dispatching is the documented fix.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use tauri::{AppHandle, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::error::{BoothError, Result};
+
+/// Upper bound for the main-thread RPC on macOS. Same rationale as
+/// `context::real::MAIN_THREAD_TIMEOUT` — generous ceiling so a
+/// momentarily-busy main thread doesn't hang the caller.
+#[cfg(target_os = "macos")]
+const MAIN_THREAD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
 pub const QUICK_PASTE_LABEL: &str = "quick-paste";
 
@@ -56,66 +71,90 @@ pub fn create_quickpaste_window(app: &AppHandle) -> Result<()> {
 
 /// Capture the foreground window so we know where to paste back.
 /// On Linux this is a no-op until Wave 4.
-pub fn capture_target_window() {
-    #[cfg(windows)]
-    {
-        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-        let hwnd = unsafe { GetForegroundWindow() };
-        TARGET_WINDOW.store(hwnd.0 as i64, Ordering::SeqCst);
-        tracing::debug!("quickpaste: captured target hwnd={}", hwnd.0 as i64);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        use objc2_app_kit::NSWorkspace;
+#[cfg(windows)]
+pub fn capture_target_window(_app: &AppHandle) {
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let hwnd = unsafe { GetForegroundWindow() };
+    TARGET_WINDOW.store(hwnd.0 as i64, Ordering::SeqCst);
+    tracing::debug!("quickpaste: captured target hwnd={}", hwnd.0 as i64);
+}
 
-        let workspace = NSWorkspace::sharedWorkspace();
-        if let Some(app) = workspace.frontmostApplication() {
-            let pid = app.processIdentifier() as i64;
-            TARGET_WINDOW.store(pid, Ordering::SeqCst);
-            tracing::debug!("quickpaste: captured target pid={pid}");
-        }
+#[cfg(target_os = "macos")]
+pub fn capture_target_window(app: &AppHandle) {
+    let (tx, rx) = std::sync::mpsc::channel::<Option<i64>>();
+    if app
+        .run_on_main_thread(move || {
+            use objc2_app_kit::NSWorkspace;
+            let workspace = NSWorkspace::sharedWorkspace();
+            let pid = workspace
+                .frontmostApplication()
+                .map(|app| app.processIdentifier() as i64);
+            let _ = tx.send(pid);
+        })
+        .is_err()
+    {
+        return;
+    }
+    if let Ok(Some(pid)) = rx.recv_timeout(MAIN_THREAD_TIMEOUT) {
+        TARGET_WINDOW.store(pid, Ordering::SeqCst);
+        tracing::debug!("quickpaste: captured target pid={pid}");
     }
 }
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn capture_target_window(_app: &AppHandle) {}
 
 /// Restore focus to the captured window. Returns true if there was a
 /// valid stash to restore. Cleared after restore so a stale value can't
 /// hijack a subsequent paste.
-pub fn restore_target_window() -> bool {
+#[cfg(windows)]
+pub fn restore_target_window(_app: &AppHandle) -> bool {
     let raw = TARGET_WINDOW.swap(0, Ordering::SeqCst);
     if raw == 0 {
         return false;
     }
-    #[cfg(windows)]
-    {
-        use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            AllowSetForegroundWindow, SetForegroundWindow,
-        };
-        // ASFW_ANY = u32::MAX
-        let _ = unsafe { AllowSetForegroundWindow(u32::MAX) };
-        let hwnd = HWND(raw as *mut _);
-        let ok = unsafe { SetForegroundWindow(hwnd) };
-        tracing::debug!("quickpaste: restore hwnd={raw} → {}", ok.as_bool());
-        ok.as_bool()
-    }
-    #[cfg(target_os = "macos")]
-    {
-        use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, SetForegroundWindow};
+    // ASFW_ANY = u32::MAX
+    let _ = unsafe { AllowSetForegroundWindow(u32::MAX) };
+    let hwnd = HWND(raw as *mut _);
+    let ok = unsafe { SetForegroundWindow(hwnd) };
+    tracing::debug!("quickpaste: restore hwnd={raw} → {}", ok.as_bool());
+    ok.as_bool()
+}
 
-        let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(raw as _)
-        else {
-            tracing::debug!("quickpaste: target pid={raw} no longer running");
-            return false;
-        };
-        let ok = app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
-        tracing::debug!("quickpaste: restore pid={raw} → {ok}");
-        ok
+#[cfg(target_os = "macos")]
+pub fn restore_target_window(app: &AppHandle) -> bool {
+    let raw = TARGET_WINDOW.swap(0, Ordering::SeqCst);
+    if raw == 0 {
+        return false;
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    if app
+        .run_on_main_thread(move || {
+            use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+            let result =
+                match NSRunningApplication::runningApplicationWithProcessIdentifier(raw as _) {
+                    Some(running) => running
+                        .activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows),
+                    None => false,
+                };
+            let _ = tx.send(result);
+        })
+        .is_err()
     {
-        let _ = raw;
-        false
+        return false;
     }
+    let ok = rx.recv_timeout(MAIN_THREAD_TIMEOUT).unwrap_or(false);
+    tracing::debug!("quickpaste: restore pid={raw} → {ok}");
+    ok
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn restore_target_window(_app: &AppHandle) -> bool {
+    let raw = TARGET_WINDOW.swap(0, Ordering::SeqCst);
+    let _ = raw;
+    false
 }
 
 pub fn show(app: &AppHandle) -> Result<()> {

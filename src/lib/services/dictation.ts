@@ -58,8 +58,9 @@ function formatFake(raw: string, style: Style): string {
     case "light":
       return capitalize(cleaned) + ".";
     case "moderate":
-      return capitalize(cleaned) + ".";
-    case "assertive":
+      // Web fake mirrors the Rust fake — Moderate gets the "[fmt]" marker
+      // so smoke tests can verify the style flowed through. The real LLM
+      // applies the format-only structuring rules.
       return "[fmt] " + capitalize(cleaned) + ".";
     case "captains-log":
       // Web fake doesn't have access to a real cleanup model, so we just

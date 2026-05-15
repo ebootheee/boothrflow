@@ -425,7 +425,7 @@ pub async fn quickpaste_paste(
     // Hide first so focus can return to the target window. SetForegroundWindow
     // works best when no window is actively claiming focus.
     let _ = crate::quickpaste::hide(&app);
-    crate::quickpaste::restore_target_window();
+    crate::quickpaste::restore_target_window(&app);
     // A small beat lets the OS settle focus before the SendInput Ctrl+V.
     std::thread::sleep(std::time::Duration::from_millis(40));
 
@@ -443,7 +443,7 @@ pub async fn quickpaste_paste(
 #[specta::specta]
 pub async fn quickpaste_close(app: tauri::AppHandle) -> Result<(), BoothError> {
     crate::quickpaste::hide(&app)?;
-    crate::quickpaste::restore_target_window();
+    crate::quickpaste::restore_target_window(&app);
     Ok(())
 }
 

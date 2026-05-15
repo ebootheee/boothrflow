@@ -26,8 +26,8 @@ describe("dictationService (web fake)", () => {
     expect(result.data.formatted.endsWith(".")).toBe(true);
   });
 
-  it("marks assertive output with [fmt]", async () => {
-    const result = await dictationService.dictateOnce({ style: "assertive" });
+  it("marks moderate output with [fmt]", async () => {
+    const result = await dictationService.dictateOnce({ style: "moderate" });
     expect(isOk(result)).toBe(true);
     if (isErr(result)) return;
     expect(result.data.formatted.startsWith("[fmt]")).toBe(true);

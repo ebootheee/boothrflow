@@ -5,12 +5,12 @@
 // switch between "leave my words alone" and "organize this for me").
 //
 // Order matters — the picker renders these in array order.
-export const STYLES = ["raw", "light", "moderate", "assertive", "captains-log"] as const;
+export const STYLES = ["raw", "light", "moderate", "captains-log"] as const;
 export type Style = (typeof STYLES)[number];
 
 // Subset shown in the main structure-aggressiveness picker.
 // Captain's Log is rendered separately as a "fun preset."
-export const STRUCTURE_STYLES = ["raw", "light", "moderate", "assertive"] as const;
+export const STRUCTURE_STYLES = ["raw", "light", "moderate"] as const;
 export type StructureStyle = (typeof STRUCTURE_STYLES)[number];
 
 export function isStyle(value: unknown): value is Style {

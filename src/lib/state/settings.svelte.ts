@@ -70,7 +70,8 @@ const defaultOptions: SettingsOptions = {
     {
       value: "base.en",
       label: "Whisper base.en — live preview (74M, 142MB)",
-      detail: "Live transcript appears as you talk. Quick, noticeably cleaner than tiny.",
+      detail:
+        "Live transcript appears as you talk. Quick, noticeably cleaner than tiny on common words. Watch for proper-name substitutions on uncommon company / product names — the 2026-05-09 bench caught it turning “Momentus” into “Mementis.” For name-heavy dictation, prefer Parakeet.",
       file: "ggml-base.en.bin",
       available: true,
     },
@@ -101,7 +102,7 @@ const defaultOptions: SettingsOptions = {
       value: "parakeet-tdt-0.6b-v3",
       label: "NVIDIA Parakeet TDT 0.6B — final transcript only (preview)",
       detail:
-        "Highest accuracy on technical jargon (Qwen, OpenAI, file paths, etc). No live preview while talking — transcript appears on release. English only.",
+        "Recommended for content with company / product / technical names — the 2026-05-09 bench had it correctly transcribing Momentus, OpenSpace, Deskpass, and Gen Log where Whisper-tiny / base substituted lookalike words. No live preview while talking — transcript appears on release. English only.",
       file: "parakeet-tdt-0.6b-v3",
       available: false,
     },

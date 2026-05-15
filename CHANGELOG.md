@@ -4,6 +4,38 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-10 — Assertive retired, Moderate rescoped to format-only, grading-UI diff
+
+### Changed
+
+- **Assertive style retired.** Bench grading on the 2026-05-09 192s investor-letter capture (20 graded variants across whisper-tiny / whisper-base / parakeet × qwen 1.5b / 7b × all four styles) showed Assertive failing catastrophically: it interpreted dictated meta-instructions ("let's write a two-paragraph opening statement about X") as content to _generate_, fabricating entire portfolio-company paragraphs about Momentus, Manta, and OpenSpace that the speaker never dictated. Parakeet+qwen2.5:7b+Assertive doubled the formatted output (1744 → 3193 chars) by emitting the whole letter twice — once plain, once inside a code fence. No model + Assertive combination scored above 2/5. The variant is gone from the enum, the picker, the bench fan-out, and the small-LLM auto-upgrade path. Persisted `"assertive"` settings + history rows migrate forward to Moderate via serde alias.
+- **Moderate rescoped to format-only.** Old Moderate allowed "light paraphrasing" + "combine fragmented sentences," which let qwen2.5:7b reorder content and rewrite sentences. New Moderate keeps paragraph breaks and adds two strict-trigger formatters (bullets ONLY when the speaker explicitly enumerates "first... second... third..."; fenced code blocks ONLY when the speaker says "in code") with hard rules against paraphrasing, reordering, merging ideas, inventing details, or adding closing summaries. Help text in Settings updated.
+- **Light + Moderate now forbid completing trailing sentence fragments.** Both top-graded Light variants on the 2026-05-09 bench lost their fifth star to a single hallucination: the speaker trailed off ("feel free to use your,") and the LLM completed the fragment ("...email tool to draft this into a markdown file"). New rule in both prompts: if a sentence trails off mid-clause, end it with an em-dash or ellipsis and stop — never infer the missing words.
+- **Light + Moderate now forbid executing meta-instructions.** Same bench round, same root cause as Assertive's worst output: the speaker described what to write ("let's draft a two-paragraph opening about AI"), and the LLM executed the description instead of preserving it. New rule: treat the speaker's words as content to be cleaned, not instructions to act on.
+- **Engine descriptions in Settings reflect graded-bench reality.** Whisper base.en's detail now flags the proper-noun substitution risk surfaced this round (Whisper-base substituted "Mementis" for "Momentus" — a portfolio-company name swap that would slip into a real investor letter without a careful proofread). Parakeet's detail is rewritten as a positive recommendation for content with company / product / technical names, with the specific examples Parakeet got right where Whisper substituted lookalikes.
+
+### Added
+
+- **Bench grading UI shows raw-vs-formatted word diff.** New `wordDiff` utility (`src/lib/services/word-diff.ts`, multiset-based, case-insensitive, punctuation-stripped) flags every word in `formatted` that doesn't have a counterpart in `raw`. The variant card in Settings → Benchmarks now renders the formatted output with added words highlighted in amber, so grading-time hallucinations and trailing-fragment completions are visible at a glance instead of having to diff two textareas by eye. 8 unit tests cover the algorithm.
+
+## 2026-05-09 — bench replay can target a single recording
+
+### Added
+
+- **`bench:replay --latest` and `--wav <substring>` filters.** `bench_replay` previously fanned out across every `.wav` in the captures dir, so iterating on a single fresh recording meant either stashing the rest or waiting through the full set. The example binary now accepts `--latest` (most-recently-modified wav, by mtime) and `--wav <substring>` (filename-contains match) for scoping a run to one capture. Argument parser tolerates a stray `--` token forwarded by pnpm 10. New convenience script: `pnpm bench:replay:latest`. Default behavior unchanged when no flags are passed.
+
+## 2026-05-05 (later) — crash + accuracy + quickpaste fixes
+
+### Fixed
+
+- **Hard crash on hotkey press (SIGABRT, foreign exception).** The session daemon called `NSWorkspace.frontmostApplication()` directly from a background thread on every dictation hotkey press and on every quickpaste open. macOS 15 raises `NSException` from these APIs off the main thread; that exception is foreign to Rust's unwinder and aborts the process via `__rust_foreign_exception`. Fixed by routing both `RealContextDetector::detect()` (`src-tauri/src/context/real.rs`) and `quickpaste::capture_target_window` / `restore_target_window` (`src-tauri/src/quickpaste.rs`) through `AppHandle::run_on_main_thread` with a 500 ms ceiling and oneshot back-channel — the calls now run on the main run loop and the session thread can't host an Obj-C exception.
+- **Quickpaste palette missing newer entries.** The webview is pre-warmed at app startup, so `onMount` only fires once. Subsequent hotkey opens reused the same component without reloading recent history. Now `QuickPasteApp.svelte` reloads on every window `focus` event so anything dictated since the last open shows up immediately.
+- **Boot-time crash when persisted STT model isn't compiled in.** `validate_settings` returned an error from the Tauri setup hook if the user's saved `whisper.model` pointed to a model whose Cargo feature wasn't in the current build (e.g. flipping between `pnpm dev` and `pnpm dev:parakeet`), and the FE never got a chance to surface it as a user-fixable picker. The `migrate()` step now falls back to the current build's default and logs the swap at info level — the daemon boots and the Settings picker shows the migrated value.
+
+### Changed
+
+- **Default STT flipped from Parakeet TDT 0.6B v3 → Whisper base.en.** Today's grading round caught Parakeet making substantive pronoun errors on a 64s capture ("he did well" → "you did well", three swaps in one paragraph) where both `whisper:tiny.en` and `whisper:base.en` got it right every time on the same WAV. Speed delta isn't worth the meaning swaps for typical use. Parakeet is still selectable in Settings; its picker description was updated to honestly note the pronoun-error trade-off rather than overselling "highest accuracy on technical jargon".
+
 ## 2026-05-05 — Wave 6 Phase 0 + small-fixes sweep
 
 ### Added
