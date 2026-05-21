@@ -249,8 +249,22 @@ fn main() -> Result<()> {
     // Candidate chat models to try. The configured model goes first so it
     // always shows up. Add more here as we add support — e.g.
     // "qwen2.5:0.5b", "llama3.2:3b", whatever you want benched.
+    //
+    // Qwen3 candidates (added for the Wave 6 Phase 2 LLM bench): the
+    // research file recommends qwen3:4b-instruct-2507 as the Pareto-
+    // dominant 7B-class swap (smaller than qwen2.5:7b + higher IFEval)
+    // and qwen3:8b for the "quality stretch if speed is at least
+    // neutral" data point. qwen3:1.7b sits in the 1.5B-class slot.
+    // Unavailable models (e.g. `ollama pull` not run yet) are skipped
+    // by the per-model handshake below — no need to gate here.
     let mut llm_candidates: Vec<String> = vec![configured_model.clone()];
-    for extra in ["qwen2.5:7b", "qwen2.5:1.5b"] {
+    for extra in [
+        "qwen2.5:7b",
+        "qwen2.5:1.5b",
+        "qwen3:4b",
+        "qwen3:8b",
+        "qwen3:1.7b",
+    ] {
         if !llm_candidates.iter().any(|m| m == extra) {
             llm_candidates.push(extra.to_string());
         }

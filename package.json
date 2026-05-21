@@ -29,6 +29,7 @@
     "download:model:linux": "scripts/download-model.sh",
     "ollama:pull": "ollama pull qwen2.5:7b && ollama pull qwen2.5:1.5b && ollama pull nomic-embed-text",
     "ollama:pull:fast": "ollama pull qwen2.5:1.5b && ollama pull nomic-embed-text",
+    "ollama:pull:bench": "ollama pull qwen2.5:7b && ollama pull qwen2.5:1.5b && ollama pull qwen3:4b && ollama pull qwen3:8b && ollama pull qwen3:1.7b && ollama pull nomic-embed-text",
     "dev:vite": "vite",
     "build:vite": "vite build",
     "preview": "vite preview",
