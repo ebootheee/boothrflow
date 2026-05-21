@@ -4,6 +4,18 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-21 (later) — Bench harness gets Nemotron streaming + Qwen3 LLM rows
+
+### Added
+
+- **NVIDIA Nemotron Speech Streaming en-0.6B as an addressable STT engine.** Wave 6 Phase 1 work. Cache-aware FastConformer-RNNT, 600M params, native streaming, LibriSpeech 2.32 / 4.84 WER at the 1120 ms chunk (better than `whisper-base.en` and natively streaming, so net-positive on both speed and quality on its target axis vs the simulated-streaming Parakeet-v3 path). Loaded via a new `stt::online_transducer` module that wraps sherpa-onnx's online recognizer through the `sherpa-rs-sys` FFI — `sherpa-rs` 0.6.8 only ships the offline recognizer in safe Rust, and the streaming graph needs the online path because its encoder takes cache tensors. `bench_replay` discovers the bundle alongside Parakeet and Whisper and fans it into the (engine × LLM × style) matrix. Pull with `pnpm download:model:mac nemotron`. License: NVIDIA Open Model License Agreement (commercial OK, not Apache/MIT).
+- **`qwen3:4b` / `qwen3:8b` / `qwen3:1.7b` in the LLM bench fan-out** (`src-tauri/examples/bench_replay.rs`). Per the model survey, `qwen3:4b-instruct-2507` is the candidate that Pareto-dominates `qwen2.5:7b` (smaller model + IFEval 83.4 vs ~76 — both axes improve). `qwen3:8b` is the "quality stretch if tok/s is at least neutral" data point. `qwen3:1.7b` slots into the 1.5B-class comparison. Pull all five up front with the new `pnpm ollama:pull:bench` script. Unavailable models are skipped by the existing per-model handshake — no setup gate needed.
+
+### Note
+
+- Production streaming for Nemotron (chunked accept_waveform + partial-result polling for live preview) is not exposed yet. The wrapper deliberately mirrors the offline `SttEngine` shape so `bench_replay` can grade Nemotron against Parakeet and Whisper without refactoring the trait. Wiring true streaming in the production hot path is Wave 6 Phase 1.5 — gated on the bench numbers showing Nemotron is the right swap.
+- Default engine and default LLM are **unchanged** by this commit. The bench harness grades; defaults flip only after the rule "net improvement in both speed and quality, or neutral in one with net improvement in the other" is verified on real captures.
+
 ## 2026-05-21 — Listen-pill overlay renders over full-screen apps on macOS
 
 ### Fixed
