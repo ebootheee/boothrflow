@@ -113,6 +113,73 @@ if [[ "${arg}" == "parakeet" ]]; then
   exit 0
 fi
 
+# ── Nemotron Speech Streaming (sherpa-onnx online transducer) ────
+# Wave 6 Phase 1 streaming engine. Cache-aware FastConformer-RNNT,
+# 600M params, native streaming at 80/160/560/1120 ms chunks.
+# License: NVIDIA Open Model License (commercial OK, not Apache/MIT;
+# see NOTICE).
+if [[ "${arg}" == "nemotron" ]]; then
+  bundle_dir="${dest_dir}/nemotron-speech-streaming-en-0.6b"
+  if [[ -f "${bundle_dir}/encoder.onnx" ]]; then
+    echo "Nemotron model already present at ${bundle_dir}"
+    echo "Delete the directory first if you want to re-download."
+    exit 0
+  fi
+
+  bundle_name="sherpa-onnx-nemotron-speech-streaming-en-0.6b-int8-2026-01-14"
+  url="https://huggingface.co/csukuangfj/${bundle_name}/resolve/main/${bundle_name}.tar.bz2"
+  archive="${dest_dir}/${bundle_name}.tar.bz2"
+
+  echo "Downloading Nemotron streaming bundle (~150 MB int8) to ${archive} ..."
+  if ! curl -L --fail -o "${archive}" "${url}"; then
+    echo "error: download failed. The published bundle name or path may have changed."
+    echo "Check https://huggingface.co/csukuangfj for the current Nemotron streaming graph."
+    rm -f "${archive}"
+    exit 1
+  fi
+
+  echo "Extracting bundle ..."
+  tar -xjf "${archive}" -C "${dest_dir}"
+  rm "${archive}"
+
+  src_dir="${dest_dir}/${bundle_name}"
+  if [[ ! -d "${src_dir}" ]]; then
+    echo "error: extracted directory ${src_dir} not found" >&2
+    exit 1
+  fi
+  mkdir -p "${bundle_dir}"
+  # Bundle ships with int8-quantized variants under stable names —
+  # normalize to the four files the engine expects. Fall back to the
+  # plain (non-int8) names if the int8 variants aren't present so the
+  # script still works if csukuangfj's archive layout shifts.
+  for f in encoder decoder joiner; do
+    if [[ -f "${src_dir}/${f}.int8.onnx" ]]; then
+      cp "${src_dir}/${f}.int8.onnx" "${bundle_dir}/${f}.onnx"
+    elif [[ -f "${src_dir}/${f}.onnx" ]]; then
+      cp "${src_dir}/${f}.onnx" "${bundle_dir}/${f}.onnx"
+    else
+      echo "error: ${f} ONNX file missing from extracted bundle" >&2
+      exit 1
+    fi
+  done
+  cp "${src_dir}/tokens.txt" "${bundle_dir}/tokens.txt"
+  rm -rf "${src_dir}"
+
+  echo
+  echo "done. Nemotron streaming model installed at ${bundle_dir}"
+  echo
+  echo "Next steps:"
+  echo "  1. Re-run the bench harness with the parakeet-engine feature"
+  echo "     (it shares the sherpa-rs dep with Parakeet):"
+  echo "       pnpm bench:replay"
+  echo "  2. Compare nemotron:streaming-en-0.6b-int8 against"
+  echo "     parakeet:0.6b-v2-int8 and whisper:base.en in the variant grader."
+  echo
+  echo "License: NVIDIA Open Model License Agreement — commercial use OK,"
+  echo "but not Apache/MIT. Noted in NOTICE for OSS distribution."
+  exit 0
+fi
+
 # ── Whisper download path ────────────────────────────────────────
 case "${arg}" in
   tiny) model="ggml-tiny.en.bin" ;;

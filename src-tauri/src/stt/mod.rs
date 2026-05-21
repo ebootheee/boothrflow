@@ -44,3 +44,15 @@ pub use streaming::{StreamingPartial, StreamingTranscriber};
 pub mod parakeet;
 #[cfg(feature = "parakeet-engine")]
 pub use parakeet::ParakeetSttEngine;
+
+// Nemotron Speech Streaming (sherpa-onnx online transducer) shares the
+// same `parakeet-engine` Cargo feature because both engines pull in
+// the sherpa-rs / sherpa-rs-sys deps. The feature flag is about the
+// 150MB sherpa-onnx prebuilt download being opt-in, not about which
+// model is selected at runtime.
+#[cfg(feature = "parakeet-engine")]
+pub mod online_transducer;
+#[cfg(feature = "parakeet-engine")]
+pub mod nemotron;
+#[cfg(feature = "parakeet-engine")]
+pub use nemotron::NemotronStreamingSttEngine;

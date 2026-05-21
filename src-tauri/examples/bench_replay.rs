@@ -66,7 +66,7 @@ use boothrflow_lib::settings::{self, Style};
 use boothrflow_lib::stt::{SttEngine, WhisperSttEngine};
 
 #[cfg(feature = "parakeet-engine")]
-use boothrflow_lib::stt::ParakeetSttEngine;
+use boothrflow_lib::stt::{NemotronStreamingSttEngine, ParakeetSttEngine};
 
 use serde::{Deserialize, Serialize};
 
@@ -562,6 +562,8 @@ enum SttBuilder {
     Whisper(PathBuf, String),
     #[cfg(feature = "parakeet-engine")]
     Parakeet(PathBuf),
+    #[cfg(feature = "parakeet-engine")]
+    Nemotron(PathBuf),
 }
 
 #[cfg(feature = "real-engines")]
@@ -582,6 +584,11 @@ impl SttConfig {
                 let engine = ParakeetSttEngine::from_model_dir(dir)?;
                 Ok(Box::new(engine))
             }
+            #[cfg(feature = "parakeet-engine")]
+            SttBuilder::Nemotron(dir) => {
+                let engine = NemotronStreamingSttEngine::from_model_dir(dir)?;
+                Ok(Box::new(engine))
+            }
         }
     }
 
@@ -599,6 +606,12 @@ impl SttConfig {
             #[cfg(feature = "parakeet-engine")]
             SttBuilder::Parakeet(dir) => {
                 let engine = ParakeetSttEngine::from_model_dir(dir)?;
+                let result = engine.transcribe(audio)?;
+                Ok(result.text)
+            }
+            #[cfg(feature = "parakeet-engine")]
+            SttBuilder::Nemotron(dir) => {
+                let engine = NemotronStreamingSttEngine::from_model_dir(dir)?;
                 let result = engine.transcribe(audio)?;
                 Ok(result.text)
             }
@@ -644,6 +657,23 @@ fn discover_stt_configs() -> Result<Vec<SttConfig>> {
             configs.push(SttConfig {
                 engine_label: "parakeet:0.6b-v2-int8".into(),
                 builder: SttBuilder::Parakeet(dir),
+            });
+        }
+    }
+
+    // Nemotron Speech Streaming — same four-file layout as Parakeet,
+    // populated by `pnpm download:model:mac nemotron`.
+    #[cfg(feature = "parakeet-engine")]
+    {
+        let dir = models_dir.join("nemotron-speech-streaming-en-0.6b");
+        if dir.join("encoder.onnx").exists()
+            && dir.join("decoder.onnx").exists()
+            && dir.join("joiner.onnx").exists()
+            && dir.join("tokens.txt").exists()
+        {
+            configs.push(SttConfig {
+                engine_label: "nemotron:streaming-en-0.6b-int8".into(),
+                builder: SttBuilder::Nemotron(dir),
             });
         }
     }
