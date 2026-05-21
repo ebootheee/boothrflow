@@ -1,6 +1,6 @@
 {
   "name": "boothrflow",
-  "version": "0.0.0",
+  "version": "0.6.0-alpha",
   "private": true,
   "license": "Apache-2.0",
   "description": "Local-first, open-source voice dictation. Push-to-talk, format, paste anywhere.",

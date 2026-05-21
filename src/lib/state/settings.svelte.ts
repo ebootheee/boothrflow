@@ -267,7 +267,7 @@ function createSettings() {
   }
 
   async function getAppVersion(): Promise<string> {
-    if (!isTauri()) return "0.0.0-web";
+    if (!isTauri()) return "0.6.0-alpha-web";
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<string>("app_version");
   }

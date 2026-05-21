@@ -334,7 +334,7 @@
 
   async function refreshAppVersion() {
     if (!inDesktop) {
-      appVersion = "0.0.0-web";
+      appVersion = "0.6.0-alpha-web";
       return;
     }
     try {

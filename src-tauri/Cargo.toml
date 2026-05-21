@@ -1,6 +1,6 @@
 [package]
 name = "boothrflow"
-version = "0.0.0"
+version = "0.6.0-alpha"
 description = "Local-first voice dictation"
 authors = ["Eric Boothe and boothrflow contributors"]
 license = "Apache-2.0"
