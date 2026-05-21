@@ -45,7 +45,96 @@ pub fn create_pill_window(app: &AppHandle) -> Result<()> {
 
     let _ = window.set_ignore_cursor_events(true);
 
+    #[cfg(target_os = "macos")]
+    configure_for_fullscreen_spaces(&window);
+
     Ok(())
+}
+
+/// Make the pill render above another app's full-screen Space.
+///
+/// Tauri's `always_on_top(true)` maps to NSWindow level
+/// `NSNormalWindowLevel + 1`, which still loses to a foreign app's
+/// full-screen content. And `NSWindowCollectionBehaviorFullScreenAuxiliary`
+/// — the official "let this window intrude into another app's full-screen
+/// Space" knob — is silently a no-op on a plain `NSWindow`: AppKit only
+/// honors it on `NSPanel` with the `NonactivatingPanel` style mask.
+///
+/// While the app ran as Accessory (LSUIElement) the system promoted our
+/// windows implicitly. Switching to Regular activation policy in #4 (so
+/// the Dock icon is a notch-proof recovery handle) removed that implicit
+/// promotion — the bug report on 2026-05-20 is the visible fallout: hotkey
+/// works, paste lands, overlay never appears.
+///
+/// Fix:
+/// 1. Swap the underlying NSWindow's runtime class to `NSPanel` so the
+///    full-screen-auxiliary collection bit actually has teeth. NSPanel is
+///    a direct subclass with the same instance layout, so swapping in
+///    place is the standard recipe (also used by the `tauri-nspanel`
+///    plugin and by Slack/Raycast/Spotlight-style HUDs).
+/// 2. OR `NonactivatingPanel` into the style mask so showing the pill
+///    doesn't pull boothrflow out of the background and force a Space
+///    switch away from the focused full-screen app.
+/// 3. Set `FullScreenAuxiliary | CanJoinAllSpaces | Stationary
+///    | IgnoresCycle` collection behavior — joins every Space (including
+///    a foreign full-screen one), stays put across Space switches, and
+///    skips Cmd-` window cycling.
+/// 4. Raise level to popup-menu so it paints above the full-screen app's
+///    content.
+#[cfg(target_os = "macos")]
+fn configure_for_fullscreen_spaces(window: &tauri::WebviewWindow) {
+    use objc2::runtime::{AnyClass, AnyObject};
+    use objc2_app_kit::{
+        NSPopUpMenuWindowLevel, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    };
+
+    let ptr = match window.ns_window() {
+        Ok(p) if !p.is_null() => p,
+        Ok(_) => {
+            tracing::warn!("pill: ns_window returned null; skipping fullscreen overlay tweaks");
+            return;
+        }
+        Err(e) => {
+            tracing::warn!("pill: ns_window unavailable ({e}); skipping fullscreen overlay tweaks");
+            return;
+        }
+    };
+
+    // SAFETY: `create_pill_window` runs on the main thread from Tauri's
+    // `setup` closure — the thread NSWindow / NSPanel methods require.
+    // The pointer is the live NSWindow Tauri just built; we only borrow
+    // it for the duration of this function, never store it. NSPanel is a
+    // direct subclass of NSWindow with no extra ivars, so reinterpreting
+    // the same allocation as either type is safe after `object_setClass`.
+    if let Some(panel_cls) = AnyClass::get(c"NSPanel") {
+        unsafe {
+            objc2::ffi::object_setClass(ptr as *mut AnyObject, panel_cls as *const AnyClass);
+        }
+    } else {
+        tracing::warn!(
+            "pill: NSPanel class lookup failed; HUD will not appear over full-screen apps"
+        );
+    }
+
+    let ns_window: &NSWindow = unsafe { &*(ptr as *mut NSWindow) };
+
+    // NonactivatingPanel: the panel can receive events without making the
+    // owning app active. Without this, showing the pill from a background
+    // app forces the OS to switch back to boothrflow's app Space and
+    // dumps the user out of whatever was full-screen.
+    let style = ns_window.styleMask() | NSWindowStyleMask::NonactivatingPanel;
+    ns_window.setStyleMask(style);
+
+    let behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
+        | NSWindowCollectionBehavior::FullScreenAuxiliary
+        | NSWindowCollectionBehavior::Stationary
+        | NSWindowCollectionBehavior::IgnoresCycle;
+    ns_window.setCollectionBehavior(behavior);
+    ns_window.setLevel(NSPopUpMenuWindowLevel);
+
+    tracing::info!(
+        "pill: configured as non-activating NSPanel (full-screen-auxiliary, popup-menu level)",
+    );
 }
 
 /// Show the pill, positioned above the dock/taskbar in the current work area.

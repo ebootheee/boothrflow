@@ -4,6 +4,12 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-21 — Listen-pill overlay renders over full-screen apps on macOS
+
+### Fixed
+
+- **Pill overlay no longer disappears when the focused app is in full-screen on macOS.** Reported 2026-05-20: holding the dictation hotkey while Claude Desktop (or any full-screen app) was active transcribed and pasted correctly but the listen-pill never painted. Root cause was the activation-policy change in #4 — switching from Accessory (LSUIElement) to Regular removed the implicit promotion that had been keeping the pill above other apps' full-screen Spaces, and `NSWindowCollectionBehaviorFullScreenAuxiliary` is a no-op on a plain `NSWindow`. The fix swaps the pill's runtime class to `NSPanel` via `object_setClass`, OR-ing `NonactivatingPanel` into its style mask, then sets `FullScreenAuxiliary | CanJoinAllSpaces | Stationary | IgnoresCycle` collection behavior and raises the level to `NSPopUpMenuWindowLevel`. That's the same recipe Slack/Raycast/Spotlight-style HUDs use to float over full-screen apps without forcing a Space switch. macOS-only; non-macOS targets are unaffected.
+
 ## 2026-05-10 — Assertive retired, Moderate rescoped to format-only, grading-UI diff
 
 ### Changed
