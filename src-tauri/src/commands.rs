@@ -258,6 +258,16 @@ pub fn microphone_available() -> bool {
     true
 }
 
+/// Enumerate available input devices for the Settings UI's mic
+/// dropdown. Real-engines only — same module that owns the cpal
+/// dependency.
+#[cfg(feature = "real-engines")]
+#[tauri::command]
+#[specta::specta]
+pub fn list_audio_input_devices() -> Result<Vec<crate::audio::MicDevice>, BoothError> {
+    crate::audio::CpalAudioSource::list_devices()
+}
+
 /// Probe whether Screen Recording TCC is currently granted, without
 /// triggering the OS prompt. Returns `true` on non-macOS (no-op) so
 /// the FE doesn't need to branch — the OCR feature itself is gated
@@ -415,7 +425,7 @@ pub async fn quickpaste_paste(
     // Hide first so focus can return to the target window. SetForegroundWindow
     // works best when no window is actively claiming focus.
     let _ = crate::quickpaste::hide(&app);
-    crate::quickpaste::restore_target_window();
+    crate::quickpaste::restore_target_window(&app);
     // A small beat lets the OS settle focus before the SendInput Ctrl+V.
     std::thread::sleep(std::time::Duration::from_millis(40));
 
@@ -433,7 +443,7 @@ pub async fn quickpaste_paste(
 #[specta::specta]
 pub async fn quickpaste_close(app: tauri::AppHandle) -> Result<(), BoothError> {
     crate::quickpaste::hide(&app)?;
-    crate::quickpaste::restore_target_window();
+    crate::quickpaste::restore_target_window(&app);
     Ok(())
 }
 

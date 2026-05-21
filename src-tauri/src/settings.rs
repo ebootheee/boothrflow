@@ -20,31 +20,54 @@ const KEYRING_EMBED_ACCOUNT: &str = "embed_api_key";
 const CURRENT_SCHEMA_VERSION: u16 = 1;
 const STORE_FILE: &str = "boothrflow.settings.json";
 
+/// Cleanup style — picks how aggressively the LLM may restructure the raw
+/// transcript. The axis is **structuring aggressiveness**, not tone:
+/// users empirically don't switch tones, but they do switch between
+/// "leave my words alone" and "organize this brain dump for me." See
+/// `docs/waves/wave-6-engine-and-formatting.md` Phase 0.
+///
+/// The legacy tone-based variants (Casual, Formal, VeryCasual, Excited)
+/// auto-migrate via serde aliases — old persisted settings deserialize
+/// straight into the new variants on read. On the next save, the new
+/// canonical names land in the JSON so the alias path is one-time.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Style {
+    /// No cleanup, paste verbatim. Code dictation, exact-quote capture.
     Raw = 0,
-    Formal = 1,
+    /// Grammar + light punctuation; paragraph kept as-is. The "what
+    /// we've been doing" baseline. Maps from the legacy Casual / VeryCasual
+    /// / Excited tone variants — those were noise relative to structure.
     #[default]
-    Casual = 2,
-    Excited = 3,
-    VeryCasual = 4,
+    #[serde(alias = "casual", alias = "very-casual", alias = "excited")]
+    Light = 1,
+    /// Format-only: paragraph splits at natural breaks, bullets when the
+    /// speaker explicitly enumerates, code fences when the speaker says
+    /// "in code." Hard-rules out paraphrasing, reordering, content
+    /// invention, and executing meta-instructions. The legacy "formal"
+    /// label and the (since-removed) Wave-6 "assertive" variant both
+    /// migrate here — Assertive's full-rewrite freedom turned out to
+    /// hallucinate paragraphs of fake portfolio-company content (see
+    /// CHANGELOG 2026-05-10).
+    #[serde(alias = "formal", alias = "assertive")]
+    Moderate = 2,
     /// Star-Trek-style log entry. Computed stardate prefix + formal
-    /// 24th-century rewrite. See ROADMAP § Phase 2 / Style presets.
+    /// 24th-century rewrite. Orthogonal to the structure axis — kept
+    /// as a fun preset.
     CaptainsLog = 5,
 }
 
 impl Style {
     /// How aggressively the cleanup pass should rewrite the raw transcript.
     /// `0` preserves every word verbatim; `1` drops disfluencies and
-    /// self-corrections; `2` allows light paraphrase. Casual/Formal/Excited
-    /// default to 1 because the prior "preserve words exactly" prompt let
-    /// mumbling and false starts ride through (Wave 3 UAT). Captain's Log
-    /// stays at 1 since paraphrase risks hallucinating canon.
+    /// self-corrections; `2` adds paragraph breaks + conditional bullets/
+    /// code fences. Captain's Log stays at 1 since paraphrase risks
+    /// hallucinating canon.
     pub fn aggressiveness(&self) -> u8 {
         match self {
             Self::Raw => 0,
-            Self::Formal | Self::Casual | Self::Excited | Self::VeryCasual | Self::CaptainsLog => 1,
+            Self::Light | Self::CaptainsLog => 1,
+            Self::Moderate => 2,
         }
     }
 }
@@ -132,6 +155,24 @@ pub struct AppSettings {
     /// of thing that needs explicit consent.
     #[serde(default)]
     pub auto_learn_corrections: bool,
+    /// Explicit microphone device name to capture from. Empty string =
+    /// auto-pick (system default, with optional Bluetooth-avoidance —
+    /// see `prefer_builtin_mic_with_bluetooth`). The exact device
+    /// names come from `audio::CpalAudioSource::list_devices()`.
+    /// Stored as `String` (not `Option<String>`) to keep the patch
+    /// shape simple — the FE can clear it by sending an empty string.
+    #[serde(default)]
+    pub audio_input_device: String,
+    /// When true (default) and `audio_input_device` is None, pick the
+    /// built-in MacBook mic instead of the system default if the
+    /// system default is a Bluetooth device (AirPods, Beats, etc.).
+    /// Avoids the macOS HFP downgrade — opening a Bluetooth mic stream
+    /// forces the entire BT link from A2DP (high-quality stereo) into
+    /// HFP (telephony codec, mono), which dims any music playing
+    /// through the same headphones for ~30 seconds. Built-in mic is
+    /// slightly lower quality but keeps A2DP intact.
+    #[serde(default = "default_true")]
+    pub prefer_builtin_mic_with_bluetooth: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]
@@ -159,6 +200,10 @@ pub struct SettingsPatch {
     pub cleanup_window_ocr: Option<bool>,
     #[specta(optional)]
     pub auto_learn_corrections: Option<bool>,
+    #[specta(optional)]
+    pub audio_input_device: Option<String>,
+    #[specta(optional)]
+    pub prefer_builtin_mic_with_bluetooth: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -230,6 +275,8 @@ impl Default for AppSettings {
             commonly_misheard: Vec::new(),
             cleanup_window_ocr: false,
             auto_learn_corrections: false,
+            audio_input_device: String::new(),
+            prefer_builtin_mic_with_bluetooth: true,
         }
     }
 }
@@ -279,6 +326,11 @@ impl SettingsStore {
             cleanup_window_ocr: self.get_or("cleanup_window_ocr", fallback.cleanup_window_ocr)?,
             auto_learn_corrections: self
                 .get_or("auto_learn_corrections", fallback.auto_learn_corrections)?,
+            audio_input_device: self.get_or("audio_input_device", fallback.audio_input_device)?,
+            prefer_builtin_mic_with_bluetooth: self.get_or(
+                "prefer_builtin_mic_with_bluetooth",
+                fallback.prefer_builtin_mic_with_bluetooth,
+            )?,
         };
         // Prefer the OS keychain over whatever's in the settings JSON.
         // Keys land in JSON only as a legacy migration path or when the
@@ -334,6 +386,12 @@ impl SettingsStore {
         }
         if let Some(auto_learn_corrections) = patch.auto_learn_corrections {
             settings.auto_learn_corrections = auto_learn_corrections;
+        }
+        if let Some(audio_input_device) = patch.audio_input_device {
+            settings.audio_input_device = audio_input_device;
+        }
+        if let Some(prefer_builtin) = patch.prefer_builtin_mic_with_bluetooth {
+            settings.prefer_builtin_mic_with_bluetooth = prefer_builtin;
         }
 
         validate_settings(&settings)?;
@@ -395,6 +453,11 @@ impl SettingsStore {
         self.set("commonly_misheard", &settings.commonly_misheard)?;
         self.set("cleanup_window_ocr", settings.cleanup_window_ocr)?;
         self.set("auto_learn_corrections", settings.auto_learn_corrections)?;
+        self.set("audio_input_device", &settings.audio_input_device)?;
+        self.set(
+            "prefer_builtin_mic_with_bluetooth",
+            settings.prefer_builtin_mic_with_bluetooth,
+        )?;
         self.store
             .save()
             .map_err(|e| BoothError::internal(format!("settings save: {e}")))?;
@@ -559,7 +622,7 @@ pub fn whisper_models() -> Vec<WhisperModel> {
             file: "parakeet-tdt-0.6b-v3",
             available: cfg!(feature = "parakeet-engine"),
             label: "NVIDIA Parakeet TDT 0.6B — final transcript only (preview)",
-            detail: "Highest accuracy on technical jargon (Qwen, OpenAI, file paths, etc). No live preview while talking — transcript appears on release. English only.",
+            detail: "Faster than Whisper but trips on pronouns and short function words on multi-sentence dictations. No live preview while talking. English only.",
             download_arg: "parakeet",
         },
     ]
@@ -710,6 +773,33 @@ fn migrate(mut settings: AppSettings) -> AppSettings {
     }
     settings.whisper.model = normalize_whisper_model(&settings.whisper.model);
 
+    // If the persisted STT model isn't available in this build (e.g. the
+    // user previously ran `pnpm dev:parakeet` and selected Parakeet, then
+    // restarted with plain `pnpm dev` which doesn't compile the
+    // `parakeet-engine` feature), fall back to the current default
+    // instead of hard-failing setup. Without this the daemon refuses to
+    // start until the JSON is hand-edited. Logged at info so the swap is
+    // discoverable.
+    if let Some(model) = whisper_model_for(&settings.whisper.model) {
+        if !model.available {
+            let fallback = default_whisper_model();
+            tracing::info!(
+                "settings: persisted STT model `{}` is not available in this build; falling back to `{}`",
+                settings.whisper.model,
+                fallback
+            );
+            settings.whisper.model = fallback;
+        }
+    } else {
+        let fallback = default_whisper_model();
+        tracing::info!(
+            "settings: persisted STT model `{}` unrecognized; falling back to `{}`",
+            settings.whisper.model,
+            fallback
+        );
+        settings.whisper.model = fallback;
+    }
+
     // Wave 5e: the legacy quick-paste default `Option + Cmd + H` collides
     // with macOS's system-wide `Cmd + H` "hide app" shortcut. AppKit
     // intercepts before our rdev listener sees the keypress, hiding
@@ -752,6 +842,14 @@ fn default_store_entries() -> Result<HashMap<String, JsonValue>> {
         "auto_learn_corrections".into(),
         json(defaults.auto_learn_corrections)?,
     );
+    entries.insert(
+        "audio_input_device".into(),
+        json(defaults.audio_input_device)?,
+    );
+    entries.insert(
+        "prefer_builtin_mic_with_bluetooth".into(),
+        json(defaults.prefer_builtin_mic_with_bluetooth)?,
+    );
     Ok(entries)
 }
 
@@ -763,19 +861,13 @@ fn default_whisper_model() -> String {
     if let Ok(file) = std::env::var("BOOTHRFLOW_WHISPER_MODEL_FILE") {
         return normalize_whisper_model(&file);
     }
-    // Production builds enable `parakeet-engine` and ship the Parakeet
-    // TDT 0.6B model — best transcription quality on our benchmarks
-    // (named entities, semantic stability) at the cost of higher first-token
-    // latency. Inner-loop dev builds (no parakeet-engine) fall back to
-    // tiny.en so the dev loop stays light.
-    #[cfg(feature = "parakeet-engine")]
-    {
-        "parakeet-tdt-0.6b-v3".into()
-    }
-    #[cfg(not(feature = "parakeet-engine"))]
-    {
-        "tiny.en".into()
-    }
+    // Whisper base.en is the default. Parakeet TDT 0.6B is faster but
+    // makes substantive pronoun errors on multi-sentence dictations
+    // ("he did well" → "you did well") that whisper-base catches every
+    // time. Speed delta is small enough on the typical <60s utterance
+    // that accuracy wins. Parakeet is still selectable in Settings for
+    // users who want the throughput on shorter, more constrained input.
+    "base.en".into()
 }
 
 fn default_ptt_hotkey() -> String {
@@ -865,6 +957,30 @@ mod tests {
             ..HotkeySettings::default()
         };
         validate_hotkey_bindings(&hotkeys).unwrap();
+    }
+
+    // The Parakeet picker entry is `available: false` unless the crate
+    // is compiled with `parakeet-engine`, so this test only makes sense
+    // when that feature is off (which is the default test config). Gate
+    // by cfg rather than runtime-skip so the test name accurately
+    // reports what's covered for any given feature combination.
+    #[cfg(not(feature = "parakeet-engine"))]
+    #[test]
+    fn migrate_falls_back_when_persisted_model_unavailable() {
+        let mut settings = AppSettings::default();
+        settings.whisper.model = "parakeet-tdt-0.6b-v3".into();
+        let migrated = migrate(settings);
+        assert_eq!(migrated.whisper.model, default_whisper_model());
+        validate_settings(&migrated).expect("migrated settings should validate");
+    }
+
+    #[test]
+    fn migrate_falls_back_when_persisted_model_unrecognized() {
+        let mut settings = AppSettings::default();
+        settings.whisper.model = "some-future-model-name".into();
+        let migrated = migrate(settings);
+        assert_eq!(migrated.whisper.model, default_whisper_model());
+        validate_settings(&migrated).expect("migrated settings should validate");
     }
 
     #[test]

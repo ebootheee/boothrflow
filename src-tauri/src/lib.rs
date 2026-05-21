@@ -50,8 +50,8 @@ use tauri_specta::{collect_commands, Builder as SpectaBuilder};
 #[cfg(feature = "real-engines")]
 use commands::{
     bench_list, bench_load, bench_save, bench_wav_path, history_clear, history_delete,
-    history_paste, history_recent, history_search, history_stats, quickpaste_close,
-    quickpaste_paste,
+    history_paste, history_recent, history_search, history_stats, list_audio_input_devices,
+    quickpaste_close, quickpaste_paste,
 };
 #[cfg(feature = "real-engines")]
 use std::sync::Arc;
@@ -92,6 +92,7 @@ pub fn build_specta() -> SpectaBuilder<tauri::Wry> {
         bench_load,
         bench_save,
         bench_wav_path,
+        list_audio_input_devices,
         dev_mode_enabled,
     ])
 }

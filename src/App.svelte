@@ -10,6 +10,7 @@
     toggleDictationHotkeyLabel,
   } from "$lib/services/platform";
   import type { Style } from "$lib/services/styles";
+  import { wordDiff } from "$lib/services/word-diff";
   import { dictationStore } from "$lib/state/dictation.svelte";
   import {
     settings,
@@ -55,17 +56,49 @@
     settings.current.hotkeys.toggle || defaultToggleDictationHotkey,
   );
 
-  const styleOptions: Array<{ value: Style; label: string; icon: IconName }> = [
-    { value: "casual", label: "Casual", icon: "pen" },
-    { value: "formal", label: "Formal", icon: "book" },
-    { value: "very-casual", label: "Very casual", icon: "sparkles" },
-    { value: "excited", label: "Excited", icon: "zap" },
-    { value: "raw", label: "Raw", icon: "audio" },
-    // Captain's Log: Star-Trek-style log entry (computed stardate prefix +
-    // formal 24th-century rewrite). Same code path as the other styles —
-    // just a different prompt branch in the cleanup backend.
-    { value: "captains-log", label: "Captain's Log", icon: "radio" },
+  // The structure-aggressiveness picker — single axis from "leave my
+  // words alone" (Raw) to "fully restructure into a memo" (Assertive).
+  // Replaced the old tone-based picker (casual / formal / very-casual /
+  // excited) in Wave 6. See `docs/waves/wave-6-engine-and-formatting.md`
+  // Phase 0. Captain's Log stays available below as a "fun preset" — it
+  // doesn't fit the structure axis (it's a tone gimmick).
+  const styleOptions: Array<{
+    value: Style;
+    label: string;
+    icon: IconName;
+    detail: string;
+  }> = [
+    {
+      value: "raw",
+      label: "Raw",
+      icon: "audio",
+      detail: "No cleanup. Paste verbatim — useful for code dictation or exact-quote capture.",
+    },
+    {
+      value: "light",
+      label: "Light",
+      icon: "pen",
+      detail:
+        "Grammar + light punctuation; paragraph kept as-is. Best for short utterances and Slack messages.",
+    },
+    {
+      value: "moderate",
+      label: "Moderate",
+      icon: "book",
+      detail:
+        "Format-only: paragraph breaks at natural pauses, bullets when you explicitly list items, code fences when you say “in code.” Never paraphrases or invents content.",
+    },
+    {
+      value: "captains-log",
+      label: "Captain's Log",
+      icon: "radio",
+      detail: "Star-Trek-style log entry. Stardate prefix + 24th-century rewrite.",
+    },
   ];
+
+  // Used by the segmented control in the General settings tab. Captain's
+  // Log is shown separately as a "fun preset" below the structure picker.
+  const structureStyleOptions = $derived(styleOptions.filter((o) => o.value !== "captains-log"));
 
   const demoNow = new Date("2026-04-28T15:42:00-06:00").toISOString();
   const demoHistory: HistoryEntry[] = [
@@ -75,7 +108,7 @@
       raw: "okay wow that was pretty impressive let's see if I speak a little faster",
       formatted:
         "Okay wow, that was pretty impressive. Let's see if I speak a little faster, if this still lands cleanly. The cleanup pass kept my tone, tightened the sentence breaks, and pasted it without making me babysit the output.",
-      style: "casual",
+      style: "light",
       app_exe: "Notepad.exe",
       window_title: "Notes",
       duration_ms: 7854,
@@ -88,7 +121,7 @@
       raw: "add connor sophie and max to the dictionary",
       formatted:
         "Add Connor, Sophie, and Max to the dictionary so their names stop getting corrected.",
-      style: "formal",
+      style: "moderate",
       app_exe: "Code.exe",
       window_title: "boothrflow",
       duration_ms: 811,
@@ -100,7 +133,7 @@
       captured_at: new Date("2026-04-27T17:22:00-06:00").toISOString(),
       raw: "make this paragraph tighter then paste it into the active document",
       formatted: "Make this paragraph tighter, then paste it into the active document.",
-      style: "casual",
+      style: "light",
       app_exe: null,
       window_title: null,
       duration_ms: 704,
@@ -121,7 +154,14 @@
   let historyStats = $state<HistoryStats | null>(null);
   let historyLoading = $state(false);
   let historyError = $state<string | null>(null);
+  // History: which row is currently expanded inline. Click a row to expand
+  // its detail beneath it; click the same row again to collapse; click a
+  // different row to swap. Replaces the old side-by-side detail panel that
+  // could overflow viewport at narrow widths. `selectedHistoryId` keeps
+  // tracking the most-recently-opened row so derived state (sttMs, llmMs,
+  // chips) doesn't lose its anchor when nothing is expanded.
   let selectedHistoryId = $state<number | null>(null);
+  let expandedHistoryId = $state<number | null>(null);
   // macOS permissions flow. The Info.plist usage strings make prod builds
   // prompt at first capture, but in dev (`tauri dev`) the prompt is
   // attributed to the parent terminal and the user has to relaunch it
@@ -294,7 +334,7 @@
 
   async function refreshAppVersion() {
     if (!inDesktop) {
-      appVersion = "0.0.0-web";
+      appVersion = "0.6.0-alpha-web";
       return;
     }
     try {
@@ -310,6 +350,7 @@
     if (settingsOpen) {
       void refreshAutostart();
       void refreshAppVersion();
+      void loadMicDevices();
     }
   });
 
@@ -323,6 +364,33 @@
       micAvailable = await invoke<boolean>("microphone_available");
     } catch {
       micAvailable = false;
+    }
+  }
+
+  // List of input devices for the Settings → General → Microphone
+  // dropdown. Loaded lazily when Settings opens. Refreshed on
+  // hotplug events would be nicer, but a manual "Refresh" button is
+  // enough for now (mic plugs aren't exactly hot-path territory).
+  type MicDeviceOption = {
+    name: string;
+    is_default: boolean;
+    default_sample_rate: number;
+    channels: number;
+  };
+  let micDevices = $state<MicDeviceOption[]>([]);
+  let micDevicesLoading = $state(false);
+
+  async function loadMicDevices() {
+    if (!inDesktop) return;
+    micDevicesLoading = true;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      micDevices = await invoke<MicDeviceOption[]>("list_audio_input_devices");
+    } catch (e) {
+      console.warn("list_audio_input_devices failed:", e);
+      micDevices = [];
+    } finally {
+      micDevicesLoading = false;
     }
   }
 
@@ -487,11 +555,20 @@
   function llmDisplay(): string {
     switch (llmStatus) {
       case "ran": {
-        const tps = dictationStore.lastDone?.llm_tok_per_sec;
+        const done = dictationStore.lastDone;
+        const tps = done?.llm_tok_per_sec;
+        const completion = done?.llm_completion_tokens;
         const base = formatMs(llmMs);
-        // Show tok/s alongside ms when the backend reported it. Distinct
-        // from `null` (Ollama silent) — null is rendered as just the ms.
-        return tps != null && tps > 0 ? `${base} · ${tps.toFixed(0)} tok/s` : base;
+        // Show tok/s when the backend reported it. If only token counts
+        // came back (some compat servers omit elapsed-aware fields),
+        // derive tok/s from completion_tokens + llm_ms as a fallback.
+        // Falls through to "ms only" when neither is available.
+        if (tps != null && tps > 0) return `${base} · ${tps.toFixed(0)} tok/s`;
+        if (completion != null && completion > 0 && llmMs > 0) {
+          const derived = completion / (llmMs / 1000);
+          return `${base} · ${derived.toFixed(0)} tok/s`;
+        }
+        return base;
       }
       case "skipped-raw":
         return "off (raw)";
@@ -916,20 +993,47 @@
                     <span class="step-icon"><Icon name="pen" size={14} /></span>
                     <div>
                       <span class="section-kicker">Style</span>
-                      <h3>Default style</h3>
+                      <h3>Default cleanup style</h3>
                     </div>
                   </div>
-                  <label class="settings-field">
-                    <span>Style</span>
-                    <select
-                      value={settings.style}
-                      onchange={(event) => selectStyle(event.currentTarget.value as Style)}
+                  <p class="settings-help">
+                    How aggressively the LLM may restructure your raw transcript. Pick the level
+                    that matches what you usually dictate — Light for short messages, Assertive for
+                    long brain dumps you want organized.
+                  </p>
+                  <div class="style-segmented" role="radiogroup" aria-label="Cleanup style level">
+                    {#each structureStyleOptions as option (option.value)}
+                      <button
+                        type="button"
+                        class="style-segment"
+                        class:active={settings.style === option.value}
+                        role="radio"
+                        aria-checked={settings.style === option.value}
+                        onclick={() => selectStyle(option.value)}
+                      >
+                        <Icon name={option.icon} size={13} />
+                        <span class="style-segment-label">{option.label}</span>
+                      </button>
+                    {/each}
+                  </div>
+                  <p class="settings-help">
+                    {styleOptions.find((o) => o.value === settings.style)?.detail ?? ""}
+                  </p>
+                  <details class="fun-presets">
+                    <summary>Fun presets</summary>
+                    <button
+                      type="button"
+                      class="style-segment"
+                      class:active={settings.style === "captains-log"}
+                      onclick={() => selectStyle("captains-log")}
                     >
-                      {#each styleOptions as option (option.value)}
-                        <option value={option.value}>{option.label}</option>
-                      {/each}
-                    </select>
-                  </label>
+                      <Icon name="radio" size={13} />
+                      <span class="style-segment-label">Captain's Log</span>
+                    </button>
+                    <p class="settings-help">
+                      Star-Trek-style log entry. Stardate prefix + 24th-century rewrite.
+                    </p>
+                  </details>
                   <label class="toggle-row">
                     <input
                       type="checkbox"
@@ -978,6 +1082,61 @@
                 </section>
 
                 {#if inDesktop}
+                  <section class="settings-section">
+                    <div class="settings-section-head">
+                      <span class="step-icon"><Icon name="mic" size={14} /></span>
+                      <div>
+                        <span class="section-kicker">Capture</span>
+                        <h3>Microphone</h3>
+                      </div>
+                    </div>
+                    <label class="settings-field">
+                      <span>Input device</span>
+                      <select
+                        value={settings.current.audio_input_device ?? ""}
+                        onchange={(event) =>
+                          void settings.update({
+                            audio_input_device: event.currentTarget.value,
+                          })}
+                      >
+                        <option value="">Auto (system default)</option>
+                        {#each micDevices as dev (dev.name)}
+                          <option value={dev.name}
+                            >{dev.name}{dev.is_default ? " (system default)" : ""}</option
+                          >
+                        {/each}
+                      </select>
+                    </label>
+                    <label class="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.current.prefer_builtin_mic_with_bluetooth ?? true}
+                        disabled={(settings.current.audio_input_device ?? "").length > 0}
+                        onchange={(event) =>
+                          void settings.update({
+                            prefer_builtin_mic_with_bluetooth: event.currentTarget.checked,
+                          })}
+                      />
+                      <span>Use built-in mic when Bluetooth headphones are connected</span>
+                    </label>
+                    <p class="settings-help">
+                      Opening a Bluetooth mic stream forces AirPods / Beats / etc. from high-quality
+                      A2DP into HFP (telephony codec, mono), which dims any music playing through
+                      the same headphones for ~30 seconds. Capturing through the built-in mic
+                      instead keeps your audio output intact at the cost of slightly worse mic
+                      quality. Override the auto-pick with the dropdown above when you specifically
+                      want the Bluetooth mic.
+                    </p>
+                    <button
+                      type="button"
+                      class="quiet-button"
+                      onclick={() => void loadMicDevices()}
+                      disabled={micDevicesLoading}
+                    >
+                      {micDevicesLoading ? "Loading..." : "Refresh device list"}
+                    </button>
+                  </section>
+
                   <section class="settings-section">
                     <div class="settings-section-head">
                       <span class="step-icon"><Icon name="zap" size={14} /></span>
@@ -1473,10 +1632,21 @@
                                   <span>Raw</span>
                                   <textarea readonly rows="2" value={v.raw}></textarea>
                                 </label>
-                                <label>
-                                  <span>Formatted</span>
-                                  <textarea readonly rows="3" value={v.formatted}></textarea>
-                                </label>
+                                <div class="variant-diff">
+                                  <span class="variant-diff-label">
+                                    Formatted
+                                    <small
+                                      >highlighted = words not in raw (likely added by LLM)</small
+                                    >
+                                  </span>
+                                  <p class="variant-diff-body">
+                                    {#each wordDiff(v.raw, v.formatted) as seg, segIdx (segIdx)}
+                                      {#if seg.added}<mark class="variant-diff-added"
+                                          >{seg.text}</mark
+                                        >{:else}{seg.text}{/if}
+                                    {/each}
+                                  </p>
+                                </div>
                               </div>
                               <div class="variant-grade">
                                 <span class="variant-grade-label">Grade</span>
@@ -1724,92 +1894,91 @@
       </aside>
     </section>
 
-    <section class="history-grid">
-      <section class="panel history-panel" aria-labelledby="history-heading">
-        <div class="panel-head history-head">
-          <div>
-            <span class="section-kicker">History</span>
-            <h2 id="history-heading">Recent transcripts</h2>
-          </div>
-          <button class="quiet-button" type="button" onclick={() => void loadHistory()}>
-            {historyLoading ? "Loading" : "Refresh"}
-          </button>
+    <section class="panel history-panel" aria-labelledby="history-heading">
+      <div class="panel-head history-head">
+        <div>
+          <span class="section-kicker">History</span>
+          <h2 id="history-heading">Recent transcripts</h2>
         </div>
+        <button class="quiet-button" type="button" onclick={() => void loadHistory()}>
+          {historyLoading ? "Loading" : "Refresh"}
+        </button>
+      </div>
 
-        {#if historyError}
-          <div class="inline-error">{historyError}</div>
-        {/if}
+      {#if historyError}
+        <div class="inline-error">{historyError}</div>
+      {/if}
 
-        {#if displayHistory.length}
-          <div class="history-table" role="list" aria-label="Recent transcript history">
-            <div class="history-row table-head" aria-hidden="true">
-              <span>Date</span>
-              <span>Latency</span>
-              <span>Style</span>
-              <span>Transcript</span>
-            </div>
-            {#each displayHistory as entry (entry.id)}
+      {#if displayHistory.length}
+        <div class="history-table" role="list" aria-label="Recent transcript history">
+          <div class="history-row table-head" aria-hidden="true">
+            <span>Date</span>
+            <span>Latency</span>
+            <span>Style</span>
+            <span>Transcript</span>
+            <span class="caret-cell" aria-hidden="true"></span>
+          </div>
+          {#each displayHistory as entry (entry.id)}
+            <div class="history-entry" class:expanded={expandedHistoryId === entry.id}>
               <button
                 class="history-row"
-                class:selected={selectedEntry?.id === entry.id}
+                class:selected={expandedHistoryId === entry.id}
                 type="button"
-                onclick={() => (selectedHistoryId = entry.id)}
+                aria-expanded={expandedHistoryId === entry.id}
+                onclick={() => {
+                  if (expandedHistoryId === entry.id) {
+                    expandedHistoryId = null;
+                  } else {
+                    expandedHistoryId = entry.id;
+                    selectedHistoryId = entry.id;
+                  }
+                }}
               >
                 <span>{formatDate(entry.captured_at)}</span>
                 <span>{formatMs(entry.duration_ms + entry.llm_ms)}</span>
                 <span>{styleLabel(entry.style)}</span>
                 <span>{preview(entry.formatted)}</span>
+                <span class="caret-cell" aria-hidden="true">
+                  {expandedHistoryId === entry.id ? "▾" : "▸"}
+                </span>
               </button>
-            {/each}
-          </div>
-        {:else}
-          <div class="empty-panel">
-            {historyLoading ? "Loading history..." : "No saved transcripts yet."}
-          </div>
-        {/if}
-      </section>
+              {#if expandedHistoryId === entry.id}
+                <div class="history-detail" role="region" aria-label="Transcript detail">
+                  <dl class="detail-meta">
+                    <div>
+                      <dt>App</dt>
+                      <dd>{appLabel(entry)}</dd>
+                    </div>
+                    <div>
+                      <dt>Total</dt>
+                      <dd>{formatMs(entry.duration_ms + entry.llm_ms)}</dd>
+                    </div>
+                    <div>
+                      <dt>STT</dt>
+                      <dd>{formatMs(entry.duration_ms)}</dd>
+                    </div>
+                    <div>
+                      <dt>LLM</dt>
+                      <dd>{formatMs(entry.llm_ms)}</dd>
+                    </div>
+                  </dl>
 
-      <section class="panel detail-panel" aria-labelledby="detail-heading">
-        <div class="panel-head">
-          <div>
-            <span class="section-kicker">Open</span>
-            <h2 id="detail-heading">Transcript detail</h2>
-          </div>
-          {#if selectedEntry}
-            <span class="subtle-text">{formatDate(selectedEntry.captured_at)}</span>
-          {/if}
+                  <article class="detail-transcript">{entry.formatted}</article>
+
+                  <details class="raw-details">
+                    <summary>Raw transcript</summary>
+                    <p>{entry.raw}</p>
+                  </details>
+                </div>
+              {/if}
+            </div>
+          {/each}
         </div>
-
-        {#if selectedEntry}
-          <dl class="detail-meta">
-            <div>
-              <dt>App</dt>
-              <dd>{appLabel(selectedEntry)}</dd>
-            </div>
-            <div>
-              <dt>Total</dt>
-              <dd>{formatMs(selectedEntry.duration_ms + selectedEntry.llm_ms)}</dd>
-            </div>
-            <div>
-              <dt>STT</dt>
-              <dd>{formatMs(selectedEntry.duration_ms)}</dd>
-            </div>
-            <div>
-              <dt>LLM</dt>
-              <dd>{formatMs(selectedEntry.llm_ms)}</dd>
-            </div>
-          </dl>
-
-          <article class="detail-transcript">{selectedEntry.formatted}</article>
-
-          <details class="raw-details">
-            <summary>Raw transcript</summary>
-            <p>{selectedEntry.raw}</p>
-          </details>
-        {:else}
-          <div class="empty-panel">Select a history row to open a transcript.</div>
-        {/if}
-      </section>
+      {:else}
+        <div class="empty-panel">
+          {historyLoading ? "Loading history..." : "No saved transcripts yet."}
+        </div>
+      {/if}
     </section>
   </main>
 {/if}

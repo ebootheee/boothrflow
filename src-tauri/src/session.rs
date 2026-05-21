@@ -169,7 +169,7 @@ mod real {
         );
 
         let audio = CpalAudioSource::new();
-        let context_detector = RealContextDetector::new();
+        let context_detector = RealContextDetector::new(app.clone());
         let learning = build_learning_coordinator(settings_store.clone());
 
         // STT engine is hot-swappable from Settings. Load once at startup,
@@ -199,7 +199,7 @@ mod real {
                 HotkeyEvent::QuickPasteOpen => {
                     // Capture the currently-focused window so we can paste
                     // back into it after the user picks an entry.
-                    crate::quickpaste::capture_target_window();
+                    crate::quickpaste::capture_target_window(&app);
                     if let Err(e) = crate::quickpaste::show(&app) {
                         tracing::warn!("quickpaste show failed: {e}");
                     }
@@ -706,6 +706,7 @@ mod real {
             return CleanupOutcome::passthrough(raw);
         }
         let settings = settings::current_app_settings();
+
         let llm = match OpenAiCompatLlmCleanup::from_settings(&settings.llm) {
             None => return CleanupOutcome::passthrough(raw),
             Some(Ok(llm)) => llm,

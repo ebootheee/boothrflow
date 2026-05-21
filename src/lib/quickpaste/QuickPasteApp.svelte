@@ -13,8 +13,22 @@
       // small delay so click-to-paste lands first
       setTimeout(() => quickPaste.close(), 60);
     };
+    // The palette window is pre-warmed at app startup, so onMount only
+    // fires once. Subsequent hotkey opens reuse the same webview, which
+    // means recent-history reloads have to be wired to focus instead of
+    // mount — otherwise everything dictated since the first open is
+    // invisible until the app restarts.
+    const onFocus = () => {
+      quickPaste.reset();
+      quickPaste.loadRecent();
+      queueMicrotask(() => inputEl?.focus());
+    };
     window.addEventListener("blur", onBlur);
-    return () => window.removeEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+    };
   });
 
   function onInput(e: Event) {

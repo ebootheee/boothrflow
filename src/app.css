@@ -322,11 +322,12 @@ kbd {
   margin-bottom: 10px;
 }
 
+/* History list renders as a single full-width panel — the per-row
+   detail expands inline beneath its row, so the old two-column
+   list+detail grid is gone. Class kept as a no-op alias in case any
+   external consumers still reference it. */
 .history-grid {
-  display: grid;
-  align-items: start;
-  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
-  gap: 10px;
+  display: block;
 }
 
 .panel {
@@ -742,6 +743,85 @@ kbd {
   color: var(--brand);
 }
 
+/* Structure-aggressiveness segmented control. Visual reinforcement of
+   the "level" mental model — equal-width buttons in a row, active one
+   in brand color. Captain's Log lives below in a `.fun-presets`
+   disclosure since it's orthogonal to the structure axis. */
+.style-segmented {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  padding: 3px;
+}
+
+button.style-segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 720;
+  padding: 6px 8px;
+}
+
+button.style-segment:hover {
+  background: var(--muted);
+}
+
+button.style-segment.active {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.style-segment-label {
+  white-space: nowrap;
+}
+
+details.fun-presets {
+  margin-top: 4px;
+}
+
+details.fun-presets summary {
+  cursor: pointer;
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0;
+  line-height: 1.1;
+  text-transform: uppercase;
+  list-style: none;
+  padding: 4px 0;
+}
+
+details.fun-presets summary::-webkit-details-marker {
+  display: none;
+}
+
+details.fun-presets summary::before {
+  content: "▸ ";
+  display: inline-block;
+  margin-right: 2px;
+  transition: transform 0.15s ease;
+}
+
+details.fun-presets[open] summary::before {
+  transform: rotate(90deg);
+}
+
+details.fun-presets button.style-segment {
+  border: 1px solid var(--line);
+  background: #fff;
+  margin-top: 4px;
+}
+
 .settings-result {
   display: inline-flex;
   align-items: center;
@@ -1020,6 +1100,49 @@ button.bench-row.selected {
   padding: 5px 7px;
 }
 
+.variant-diff {
+  display: grid;
+  gap: 2px;
+}
+
+.variant-diff-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.variant-diff-label small {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+  color: var(--subtle);
+}
+
+.variant-diff-body {
+  margin: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 5px 7px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.variant-diff-added {
+  background: #fff3c4;
+  color: #6b4f00;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .variant-grade {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -1209,7 +1332,7 @@ button.star-btn.filled svg {
 
 .history-row {
   display: grid;
-  grid-template-columns: 116px 78px 92px minmax(0, 1fr);
+  grid-template-columns: 116px 78px 92px minmax(0, 1fr) 18px;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -1218,6 +1341,42 @@ button.star-btn.filled svg {
   color: var(--ink);
   padding: 8px 10px;
   text-align: left;
+  width: 100%;
+}
+
+.caret-cell {
+  color: var(--subtle);
+  font-size: 11px;
+  text-align: center;
+  line-height: 1;
+}
+
+button.history-row[aria-expanded="true"] .caret-cell {
+  color: var(--brand);
+}
+
+/* Inline expand-under-row for the detail view. Replaces the old
+   side-by-side detail panel that could overflow viewport. The detail
+   block sits as a sibling beneath its row inside `.history-entry` and
+   inherits the row's full width so meta + transcript + raw flow stack
+   cleanly. Click again on the same row → collapse; click another row →
+   the previous collapses and the new one opens. */
+.history-entry {
+  display: contents;
+}
+
+.history-entry.expanded button.history-row {
+  border-top-color: var(--line);
+  background: var(--mint-soft);
+}
+
+.history-detail {
+  border-top: 1px solid var(--line-soft);
+  background: #fbfcfc;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 button.history-row {
@@ -1292,7 +1451,6 @@ button.history-row span:last-child {
 @media (max-width: 980px) {
   .toolbar,
   .workspace-grid,
-  .history-grid,
   .settings-grid {
     grid-template-columns: 1fr;
   }

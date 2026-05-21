@@ -4,6 +4,108 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-21 — Listen-pill overlay renders over full-screen apps on macOS
+
+### Fixed
+
+- **Pill overlay no longer disappears when the focused app is in full-screen on macOS.** Reported 2026-05-20: holding the dictation hotkey while Claude Desktop (or any full-screen app) was active transcribed and pasted correctly but the listen-pill never painted. Root cause was the activation-policy change in #4 — switching from Accessory (LSUIElement) to Regular removed the implicit promotion that had been keeping the pill above other apps' full-screen Spaces, and `NSWindowCollectionBehaviorFullScreenAuxiliary` is a no-op on a plain `NSWindow`. The fix swaps the pill's runtime class to `NSPanel` via `object_setClass`, OR-ing `NonactivatingPanel` into its style mask, then sets `FullScreenAuxiliary | CanJoinAllSpaces | Stationary | IgnoresCycle` collection behavior and raises the level to `NSPopUpMenuWindowLevel`. That's the same recipe Slack/Raycast/Spotlight-style HUDs use to float over full-screen apps without forcing a Space switch. macOS-only; non-macOS targets are unaffected.
+
+## 2026-05-10 — Assertive retired, Moderate rescoped to format-only, grading-UI diff
+
+### Changed
+
+- **Assertive style retired.** Bench grading on the 2026-05-09 192s investor-letter capture (20 graded variants across whisper-tiny / whisper-base / parakeet × qwen 1.5b / 7b × all four styles) showed Assertive failing catastrophically: it interpreted dictated meta-instructions ("let's write a two-paragraph opening statement about X") as content to _generate_, fabricating entire portfolio-company paragraphs about Momentus, Manta, and OpenSpace that the speaker never dictated. Parakeet+qwen2.5:7b+Assertive doubled the formatted output (1744 → 3193 chars) by emitting the whole letter twice — once plain, once inside a code fence. No model + Assertive combination scored above 2/5. The variant is gone from the enum, the picker, the bench fan-out, and the small-LLM auto-upgrade path. Persisted `"assertive"` settings + history rows migrate forward to Moderate via serde alias.
+- **Moderate rescoped to format-only.** Old Moderate allowed "light paraphrasing" + "combine fragmented sentences," which let qwen2.5:7b reorder content and rewrite sentences. New Moderate keeps paragraph breaks and adds two strict-trigger formatters (bullets ONLY when the speaker explicitly enumerates "first... second... third..."; fenced code blocks ONLY when the speaker says "in code") with hard rules against paraphrasing, reordering, merging ideas, inventing details, or adding closing summaries. Help text in Settings updated.
+- **Light + Moderate now forbid completing trailing sentence fragments.** Both top-graded Light variants on the 2026-05-09 bench lost their fifth star to a single hallucination: the speaker trailed off ("feel free to use your,") and the LLM completed the fragment ("...email tool to draft this into a markdown file"). New rule in both prompts: if a sentence trails off mid-clause, end it with an em-dash or ellipsis and stop — never infer the missing words.
+- **Light + Moderate now forbid executing meta-instructions.** Same bench round, same root cause as Assertive's worst output: the speaker described what to write ("let's draft a two-paragraph opening about AI"), and the LLM executed the description instead of preserving it. New rule: treat the speaker's words as content to be cleaned, not instructions to act on.
+- **Engine descriptions in Settings reflect graded-bench reality.** Whisper base.en's detail now flags the proper-noun substitution risk surfaced this round (Whisper-base substituted "Mementis" for "Momentus" — a portfolio-company name swap that would slip into a real investor letter without a careful proofread). Parakeet's detail is rewritten as a positive recommendation for content with company / product / technical names, with the specific examples Parakeet got right where Whisper substituted lookalikes.
+
+### Added
+
+- **Bench grading UI shows raw-vs-formatted word diff.** New `wordDiff` utility (`src/lib/services/word-diff.ts`, multiset-based, case-insensitive, punctuation-stripped) flags every word in `formatted` that doesn't have a counterpart in `raw`. The variant card in Settings → Benchmarks now renders the formatted output with added words highlighted in amber, so grading-time hallucinations and trailing-fragment completions are visible at a glance instead of having to diff two textareas by eye. 8 unit tests cover the algorithm.
+
+## 2026-05-09 — bench replay can target a single recording
+
+### Added
+
+- **`bench:replay --latest` and `--wav <substring>` filters.** `bench_replay` previously fanned out across every `.wav` in the captures dir, so iterating on a single fresh recording meant either stashing the rest or waiting through the full set. The example binary now accepts `--latest` (most-recently-modified wav, by mtime) and `--wav <substring>` (filename-contains match) for scoping a run to one capture. Argument parser tolerates a stray `--` token forwarded by pnpm 10. New convenience script: `pnpm bench:replay:latest`. Default behavior unchanged when no flags are passed.
+
+## 2026-05-05 (later) — crash + accuracy + quickpaste fixes
+
+### Fixed
+
+- **Hard crash on hotkey press (SIGABRT, foreign exception).** The session daemon called `NSWorkspace.frontmostApplication()` directly from a background thread on every dictation hotkey press and on every quickpaste open. macOS 15 raises `NSException` from these APIs off the main thread; that exception is foreign to Rust's unwinder and aborts the process via `__rust_foreign_exception`. Fixed by routing both `RealContextDetector::detect()` (`src-tauri/src/context/real.rs`) and `quickpaste::capture_target_window` / `restore_target_window` (`src-tauri/src/quickpaste.rs`) through `AppHandle::run_on_main_thread` with a 500 ms ceiling and oneshot back-channel — the calls now run on the main run loop and the session thread can't host an Obj-C exception.
+- **Quickpaste palette missing newer entries.** The webview is pre-warmed at app startup, so `onMount` only fires once. Subsequent hotkey opens reused the same component without reloading recent history. Now `QuickPasteApp.svelte` reloads on every window `focus` event so anything dictated since the last open shows up immediately.
+- **Boot-time crash when persisted STT model isn't compiled in.** `validate_settings` returned an error from the Tauri setup hook if the user's saved `whisper.model` pointed to a model whose Cargo feature wasn't in the current build (e.g. flipping between `pnpm dev` and `pnpm dev:parakeet`), and the FE never got a chance to surface it as a user-fixable picker. The `migrate()` step now falls back to the current build's default and logs the swap at info level — the daemon boots and the Settings picker shows the migrated value.
+
+### Changed
+
+- **Default STT flipped from Parakeet TDT 0.6B v3 → Whisper base.en.** Today's grading round caught Parakeet making substantive pronoun errors on a 64s capture ("he did well" → "you did well", three swaps in one paragraph) where both `whisper:tiny.en` and `whisper:base.en` got it right every time on the same WAV. Speed delta isn't worth the meaning swaps for typical use. Parakeet is still selectable in Settings; its picker description was updated to honestly note the pronoun-error trade-off rather than overselling "highest accuracy on technical jargon".
+
+## 2026-05-05 — Wave 6 Phase 0 + small-fixes sweep
+
+### Added
+
+- **Wave 6 Phase 0 — structure-aggressiveness style overhaul** (commit `d71cb90`). New `Style` enum: **Raw / Light / Moderate / Assertive** + Captain's Log retained as orthogonal preset. Replaces the tone-based system (casual / formal / very-casual / excited). Old persisted settings auto-migrate via serde aliases (no manual fix-up needed). New cleanup prompts per level. Settings UI shows a 4-option segmented control with help text per level. Captain's Log under "Fun presets" disclosure. `bench:replay` fans out across all 4 structure styles + raw.
+- **History detail → inline expand-under-row** (commit `60bb2b0`). Old side-by-side detail panel could overflow viewport at narrow widths. Now: click a row, detail expands beneath; click same row to collapse; click another to swap. Caret glyph (▸ / ▾) signals state.
+- **Cleanup chip tok/s fallback** (commit `60bb2b0`). When the LLM backend reports `completion_tokens` + `llm_ms` but skips the explicit `tok_per_sec` field, the FE now derives tok/s from those instead of silently dropping it.
+- **Bluetooth-aware mic default + manual override** (commit `a7302de`). When system default input is a Bluetooth mic (AirPods / Beats / Sony WH/WF / Bose), boothrflow now silently uses the built-in mic instead — avoids the macOS HFP downgrade that dims music for ~30 seconds. New Settings → General → **Microphone** section with a device-picker dropdown + "Use built-in mic when Bluetooth headphones are connected" toggle (default on). User can pin any specific device explicitly via the dropdown to override the auto-pick.
+- **Assertive prompt tightening + small-LLM auto-upgrade** (commit `4ba7e95`). First bench grading exposed three failure modes: invented `### Section` headers when the speaker had no transitions, fake "Hi <name>... Best, [Your Name]" Mail signatures in non-Mail contexts, and "Sure, here is the formatted text:" preambles from qwen 1.5b. New prompt makes every structuring permission CONDITIONAL on its trigger being present (transition cues for headers, listing cues for bullets, Mail-app context for greetings) + explicit anti-pattern bans (no preambles, no `[Your Name]` placeholders, no horizontal rules, no closing summaries). Inline backticks on filenames also banned across Light / Moderate / Assertive — Claude Code's chat input was rewriting `` `devops.md` `` into `[devops.md](http://devops.md)` markdown links on paste.
+- **Auto-upgrade qwen 0.5b/1.5b/3b → 7b for Assertive only** (commit `4ba7e95`). Small models can't follow Assertive's nuanced rules. The user's configured default stays unchanged for the other styles; only Assertive routes through the upgrade. Bench `bench:replay` does NOT upgrade (preserves the 1.5b-on-Assertive variant for grading).
+- **Bench harness warmup pass** (commit `4ba7e95`). `bench:replay` now loads the engine once per config and runs a throwaway 1-second silence pass before timing the real transcription. Without this, first-tested engine paid model load + GPU context init, inflating its `stt_ms` ~10x (whisper-tiny.en went 6.3s → 770ms between two runs of identical audio in the first round).
+
+### Fixed
+
+- **Honest tok/s display** — Cleanup chip now shows tok/s in more cases (any LLM that reports `completion_tokens` will get a derived tok/s, not just ones that ship the explicit field).
+- **Music-dimming on Bluetooth output** — see Bluetooth mic default above. Was a real macOS HFP behavior, not a boothrflow bug, but the default behavior now sidesteps it.
+
+### Changed
+
+- **Settings → General → Style** picker is now a segmented control (4 buttons) rather than a 6-option dropdown. Visual reinforcement of "level" mental model. Help text per option.
+- **Defaults for new installs**: structure-aggressiveness = `Light` (default in the migration map for legacy `casual` / `very-casual` / `excited`). Mic = "Auto" (system default with Bluetooth-aware fallback). Toggle = on.
+
+### Lessons learned (carried into Phase 1+ planning)
+
+- **Bench cold-start ordering bias was real and significant** — first-tested engine ate the model-load cost, looked 10x slower than the others. Phase 3 `bench harness hardening` partially shipped (warmup); N=3 + median + aggregate-leaderboard still pending.
+- **Small LLMs can't follow Assertive's nuanced rules** — qwen 1.5b on long Assertive prompts emits placeholders, fake signatures, preambles. The auto-upgrade is the right pattern; we'll likely need similar guardrails for any future structure-heavy style.
+- **Plain-prose backticks on filenames cause more problems than they solve** — even when the destination renders markdown (Slack, Notion, Obsidian), apps like Claude Code interpret them as auto-link triggers. Plain text is the safe default; code fences for actual code only.
+
+## 2026-05-04 — wave reordering (Wave 6 ↔ 7 swap, Wave 8 added)
+
+### Changed
+
+- **Swapped Wave 6 and Wave 7.** New ordering: **Wave 6 = engine + formatting** (was old Wave 7), **Wave 7 = production polish** (was old Wave 6). Reasoning: dial in the engine and the cleanup pass _before_ packaging it into a signed installer. Better one user (Eric) on a fast iteration loop with the right engine than ten users on a polished installer of a placeholder.
+- **Branch + doc renames** — `feat/wave-7-streaming-stt` → `feat/wave-6-engine-and-formatting`. `docs/waves/wave-7-streaming-stt.md` → `docs/waves/wave-6-engine-and-formatting.md`. `docs/waves/wave-6-production-polish.md` → `docs/waves/wave-7-production-polish.md`.
+
+### Added
+
+- **New Phase 0 in Wave 6: style overhaul.** Replace the tone-based `Style` enum (casual / formal / very-casual / excited / raw / captains-log) with a single **structuring-aggressiveness axis**: raw / light / moderate / assertive. Tone variation turned out to be noise; users actually vary how aggressively the LLM should structure output. `Assertive` adopts Wispr's auto-format playbook (bullets when listing, paragraph breaks at sentence-boundary pauses, code fences for "in code" cues, greeting + sign-off when focused app is Mail). Captain's Log retained as an orthogonal fun preset. Day-one work, testable immediately.
+- **New Wave 8 — Connectors + UI rebuild + privacy audit.** Pulls forward three items from Future Ideas into a dedicated wave: (1) Connector trait + Obsidian vault push + custom HTTP webhook + Slack incoming webhooks + voice-triggered routing + History row push action; (2) hyper-modern UI rebuild (visual language refresh, pill redesign, Liquid Glass / NSVisualEffectView vibrancy on macOS, Cmd-K command palette, keyboard shortcuts); (3) `PRIVACY_AUDIT.md` with pre-written AI-assistant verification prompt + default-features checklist + BYOK callouts + telemetry confirmation + pass/fail table. Plan: [`docs/waves/wave-8-connectors-ui-privacy.md`](./docs/waves/wave-8-connectors-ui-privacy.md).
+
+### Removed
+
+- **From "Future Ideas":** Connectors section, Hyper-modern UI rebuild section, Privacy audit doc section (all promoted to Wave 8). "Parakeet → default engine" candidate (already done — landed as part of the Wave 5 → main merge).
+
+## 2026-05-04 (Wave 5 → main, Wave 7 plan)
+
+### Added
+
+- **Wave 5 merged to main** (`feat/wave-5` → `main` via `--no-ff`, commit `763d370`). 20 commits covering context-aware cleanup, Parakeet TDT 0.6B v2 engine, post-paste learning coordinator, macOS Vision OCR, focused-AX read, captures-to-disk, bench replay tool, in-app grading UI.
+- **Developer mode flag (`BOOTHRFLOW_DEV=1`)** replaces `BOOTHRFLOW_SAVE_CAPTURES`. Single umbrella that gates capture saving + Benchmarks tab visibility + future dev-only surfaces. Production builds default the tab off; devs flip the env var to unlock.
+- **Multi-LLM bench fan-out.** `bench:replay` now iterates across qwen2.5:7b + qwen2.5:1.5b (configurable list) instead of just the user's currently-configured model. Raw style emits one variant per STT (no LLM dependency) instead of one per (STT × LLM).
+- **Wave 7 plan committed** — [`docs/waves/wave-7-streaming-stt.md`](./docs/waves/wave-7-streaming-stt.md). Two parallel tracks targeting the streaming + cold-start gaps offline Parakeet exposed: Phase 1 Nemotron Speech Streaming via sherpa-onnx (3-5d), Phase 2 parakeet.cpp evaluation on Apple Silicon (2-3d), Phase 3 bench harness hardening — warmup pass + N=3 median (1d). Default STT for production gets re-decided from leaderboard grades after both phases land.
+
+### Changed
+
+- **Defaults: Parakeet TDT 0.6B v2 + qwen2.5:7b for production builds.** Inner-loop dev (no `parakeet-engine` feature) still defaults to whisper tiny.en so the dev loop stays light. Driven by Wave 5 bench results: on a 116s Lysara dictation, Parakeet was the only engine that got the named entity right and avoided "paste" → "pay" semantic substitution.
+
+### First-run benchmark findings (Lysara capture, 116s)
+
+- whisper:tiny.en → "LISAR", "pay" (semantically wrong); STT 770ms (post-warmup); LLM 7b 8.8s, 1.5b 3.1s.
+- whisper:base.en → "Lysara" ✓, "pay" (still wrong); STT 851ms; LLM 7b 4.0s, 1.5b 1.5s.
+- parakeet:0.6b-v2-int8 → all entities + verbs correct; STT 13.5s (load + decode, consistent across runs); LLM 7b 4.2s, 1.5b 1.4s.
+- qwen2.5:1.5b is ~3× faster than 7b across every variant but **dropped trailing content** on the parakeet+1.5b cleanup (cut last sentence + middle phrase). Suggests a "1.5b for short utterances, 7b for long" heuristic for a future setting.
+
 ## 2026-05-03 (planning)
 
 ### Added

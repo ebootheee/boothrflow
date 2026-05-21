@@ -62,10 +62,12 @@ fn apply_style(text: &str, style: &Style) -> String {
     let rest: String = chars.collect();
     match style {
         Style::Raw => text.to_string(),
-        Style::Formal => format!("{}{}.", first.to_uppercase(), rest),
-        Style::Casual => format!("{}{}", first.to_lowercase(), rest),
-        Style::Excited => format!("{}{}!", first.to_uppercase(), rest),
-        Style::VeryCasual => text.to_lowercase(),
+        // Light = baseline cleanup: capitalize first letter, period at end.
+        Style::Light => format!("{}{}.", first.to_uppercase(), rest),
+        // Moderate = wraps with a "[fmt]" marker so tests can verify the
+        // style flowed through. The real LLM applies the actual format-only
+        // structuring rules; the fake just signals "Moderate ran here."
+        Style::Moderate => format!("[fmt] {}{}.", first.to_uppercase(), rest),
         Style::CaptainsLog => format!(
             "Captain's log, stardate {}. {}{}.  End log.",
             crate::llm::stardate_label(),
@@ -100,17 +102,30 @@ mod tests {
     }
 
     #[test]
-    fn formal_style_ends_with_period() {
+    fn light_style_ends_with_period() {
         let llm = FakeLlmCleanup;
         let out = llm
             .cleanup(CleanupRequest {
                 raw_text: "ship it",
-                style: Style::Formal,
+                style: Style::Light,
                 ..Default::default()
             })
             .unwrap();
         assert!(out.text.ends_with('.'));
         assert!(out.text.starts_with("S"));
+    }
+
+    #[test]
+    fn moderate_style_marks_output() {
+        let llm = FakeLlmCleanup;
+        let out = llm
+            .cleanup(CleanupRequest {
+                raw_text: "ship it",
+                style: Style::Moderate,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(out.text.starts_with("[fmt]"));
     }
 
     #[test]

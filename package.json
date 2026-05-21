@@ -1,6 +1,6 @@
 {
   "name": "boothrflow",
-  "version": "0.0.0",
+  "version": "0.6.0-alpha",
   "private": true,
   "license": "Apache-2.0",
   "description": "Local-first, open-source voice dictation. Push-to-talk, format, paste anywhere.",
@@ -34,7 +34,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "gen": "cd src-tauri && cargo run --example export_bindings --features real-engines",
-    "bench:replay": "cd src-tauri && cargo run --example bench_replay --features \"real-engines parakeet-engine\"",
+    "bench:replay": "cd src-tauri && cargo run --example bench_replay --features \"real-engines parakeet-engine\" --",
+    "bench:replay:latest": "cd src-tauri && cargo run --example bench_replay --features \"real-engines parakeet-engine\" -- --latest",
     "test": "pnpm test:fe && pnpm test:rust",
     "test:fe": "vitest run",
     "test:fe:watch": "vitest",

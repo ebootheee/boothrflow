@@ -14,6 +14,17 @@
 //! Build:
 //!   cargo run --example bench_replay --features "real-engines parakeet-engine"
 //!
+//! Filtering (optional, defaults to "every wav in the dir"):
+//!   --latest             only the most recently modified .wav
+//!   --wav <substring>    only wavs whose filename contains <substring>
+//!                        (matches stem or full filename, case-sensitive)
+//!   -h | --help          print usage
+//!
+//! When invoked via pnpm, forward args after `--`:
+//!   pnpm bench:replay -- --latest
+//!   pnpm bench:replay -- --wav 2026-05-10
+//!   pnpm bench:replay:latest         (convenience alias)
+//!
 //! Configs auto-detected:
 //!   - Every Whisper `.bin` in models dir → one variant
 //!   - Parakeet model dir if present (and built with `parakeet-engine`)
@@ -92,7 +103,70 @@ fn main() {
 }
 
 #[cfg(feature = "real-engines")]
+#[derive(Default)]
+struct CliArgs {
+    latest_only: bool,
+    wav_filter: Option<String>,
+}
+
+#[cfg(feature = "real-engines")]
+fn parse_args() -> CliArgs {
+    let mut out = CliArgs::default();
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let mut i = 0;
+    while i < raw.len() {
+        match raw[i].as_str() {
+            // pnpm 10 forwards a literal `--` separator from `pnpm <script> -- <args>`
+            // alongside our own trailing `--`, so the binary may receive a stray `--`
+            // ahead of real flags. Tolerate it.
+            "--" => {
+                i += 1;
+            }
+            "--latest" => {
+                out.latest_only = true;
+                i += 1;
+            }
+            "--wav" => {
+                let Some(val) = raw.get(i + 1) else {
+                    eprintln!("--wav requires a value (filename substring)");
+                    std::process::exit(64);
+                };
+                out.wav_filter = Some(val.clone());
+                i += 2;
+            }
+            "-h" | "--help" => {
+                print_help();
+                std::process::exit(0);
+            }
+            other => {
+                eprintln!("unknown arg: {other}");
+                print_help();
+                std::process::exit(64);
+            }
+        }
+    }
+    if out.latest_only && out.wav_filter.is_some() {
+        eprintln!("--latest and --wav are mutually exclusive");
+        std::process::exit(64);
+    }
+    out
+}
+
+#[cfg(feature = "real-engines")]
+fn print_help() {
+    eprintln!("bench_replay [--latest | --wav <substring>]");
+    eprintln!();
+    eprintln!("  --latest             only the most recently modified .wav");
+    eprintln!("  --wav <substring>    only wavs whose filename contains <substring>");
+    eprintln!("  -h | --help          print this help");
+    eprintln!();
+    eprintln!("Default (no flags): bench every .wav in the captures dir.");
+}
+
+#[cfg(feature = "real-engines")]
 fn main() -> Result<()> {
+    let args = parse_args();
+
     let captures_dir = dirs::data_dir()
         .ok_or_else(|| {
             boothrflow_lib::error::BoothError::internal("could not resolve user data dir")
@@ -107,12 +181,49 @@ fn main() -> Result<()> {
     }
 
     eprintln!("bench_replay: scanning {}", captures_dir.display());
-    let wavs = list_wavs(&captures_dir);
-    if wavs.is_empty() {
+    let all_wavs = list_wavs(&captures_dir);
+    if all_wavs.is_empty() {
         eprintln!("no .wav files in {}", captures_dir.display());
         std::process::exit(0);
     }
+
+    let wavs = if args.latest_only {
+        match pick_latest(&all_wavs) {
+            Some(p) => {
+                eprintln!(
+                    "--latest: {}",
+                    p.file_name().and_then(|n| n.to_str()).unwrap_or("?")
+                );
+                vec![p]
+            }
+            None => {
+                eprintln!("--latest: could not read mtime on any wav");
+                std::process::exit(0);
+            }
+        }
+    } else if let Some(needle) = args.wav_filter.as_deref() {
+        let filtered: Vec<PathBuf> = all_wavs
+            .into_iter()
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.contains(needle))
+            })
+            .collect();
+        if filtered.is_empty() {
+            eprintln!(
+                "no .wav files matching '{needle}' in {}",
+                captures_dir.display()
+            );
+            std::process::exit(0);
+        }
+        eprintln!("--wav '{needle}' matched {} file(s)", filtered.len());
+        filtered
+    } else {
+        all_wavs
+    };
     eprintln!("found {} wav(s)", wavs.len());
+    let processed_count = wavs.len();
 
     // Discover available STT engines from the models dir.
     let stt_configs = discover_stt_configs()?;
@@ -163,7 +274,15 @@ fn main() -> Result<()> {
         std::process::exit(4);
     }
 
-    let styles = [("casual", Style::Casual), ("raw", Style::Raw)];
+    // Per-style fan-out for the bench. Assertive was retired on
+    // 2026-05-10 after the structure-aggressiveness round showed it
+    // hallucinating entire paragraphs. Moderate now occupies the
+    // "format-only" slot at the top of the axis.
+    let styles = [
+        ("light", Style::Light),
+        ("moderate", Style::Moderate),
+        ("raw", Style::Raw),
+    ];
 
     let mut total_variants = 0usize;
     for wav_path in wavs {
@@ -190,12 +309,38 @@ fn main() -> Result<()> {
 
         let mut variants = Vec::new();
         for stt_config in &stt_configs {
-            // Load the engine for this config; drop after replay so memory
-            // doesn't pile up across multiple Whisper variants.
             eprintln!("  ↳ {}", stt_config.engine_label);
+
+            // Load engine once. Warmup pass + timed pass share the same
+            // loaded model + GPU context, so the timed `stt_ms` measures
+            // decode cost only — not load + decode. Without this fix,
+            // whichever engine ran first paid model-load cost on its
+            // single invocation and looked ~10x slower than the others
+            // (whisper-tiny.en hit 6.3s on its first call vs 770ms on
+            // the second, same audio + same engine in two-run bench).
+            let engine = match stt_config.load_engine() {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("    load failed: {e}");
+                    continue;
+                }
+            };
+            let warmup_audio = vec![0.0f32; 16_000];
+            let warmup_started = Instant::now();
+            match engine.transcribe(&warmup_audio) {
+                Ok(_) => eprintln!(
+                    "    warmup ok ({} ms)",
+                    warmup_started.elapsed().as_millis()
+                ),
+                Err(e) => {
+                    eprintln!("    warmup failed: {e}");
+                    continue;
+                }
+            }
+
             let stt_started = Instant::now();
-            let raw = match stt_config.transcribe(&audio) {
-                Ok(text) => text,
+            let raw = match engine.transcribe(&audio) {
+                Ok(result) => result.text,
                 Err(e) => {
                     eprintln!("    stt failed: {e}");
                     continue;
@@ -203,6 +348,9 @@ fn main() -> Result<()> {
             };
             let stt_ms = stt_started.elapsed().as_millis() as u64;
             eprintln!("    raw ({} ms): {}", stt_ms, preview(&raw, 80));
+            // Drop engine before LLM cleanup loops to free GPU memory
+            // for any subsequent Whisper / Parakeet engine load.
+            drop(engine);
 
             for (style_name, style) in &styles {
                 if matches!(style, Style::Raw) {
@@ -291,8 +439,7 @@ fn main() -> Result<()> {
 
     eprintln!(
         "\nbench_replay: wrote {} variant(s) across {} wav(s)",
-        total_variants,
-        list_wavs(&captures_dir).len()
+        total_variants, processed_count
     );
     eprintln!(
         "Grade by editing the `grade` field (1-5) and `notes` (string) in each .variants.json,"
@@ -314,6 +461,19 @@ fn list_wavs(dir: &Path) -> Vec<PathBuf> {
         .collect();
     wavs.sort();
     wavs
+}
+
+#[cfg(feature = "real-engines")]
+fn pick_latest(wavs: &[PathBuf]) -> Option<PathBuf> {
+    wavs.iter()
+        .filter_map(|p| {
+            fs::metadata(p)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .map(|t| (t, p))
+        })
+        .max_by_key(|(t, _)| *t)
+        .map(|(_, p)| p.clone())
 }
 
 #[cfg(feature = "real-engines")]
@@ -392,6 +552,29 @@ enum SttBuilder {
 
 #[cfg(feature = "real-engines")]
 impl SttConfig {
+    /// Construct the engine once. Caller owns it and runs as many
+    /// transcribe calls as it wants — first throwaway (warmup) so the
+    /// timed pass sees a hot Metal context + loaded model weights;
+    /// subsequent timed call(s) measure decode-only cost. Drop at end
+    /// of config to free GPU memory before the next engine loads.
+    fn load_engine(&self) -> Result<Box<dyn SttEngine + Send>> {
+        match &self.builder {
+            SttBuilder::Whisper(path, name) => {
+                let engine = WhisperSttEngine::from_path(path, name.clone())?;
+                Ok(Box::new(engine))
+            }
+            #[cfg(feature = "parakeet-engine")]
+            SttBuilder::Parakeet(dir) => {
+                let engine = ParakeetSttEngine::from_model_dir(dir)?;
+                Ok(Box::new(engine))
+            }
+        }
+    }
+
+    /// Legacy single-shot path — used in places that don't care about
+    /// warmup (e.g. ad-hoc tests). The bench loop should hold a loaded
+    /// engine across warmup + timed runs instead.
+    #[allow(dead_code)]
     fn transcribe(&self, audio: &[f32]) -> Result<String> {
         match &self.builder {
             SttBuilder::Whisper(path, name) => {
