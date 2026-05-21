@@ -3,7 +3,6 @@
 > Local-first voice dictation. Push-to-talk, transcribe, paste anywhere. All on your machine.
 > <img width="2134" height="1546" alt="image" src="https://github.com/user-attachments/assets/f84cb0b5-55e9-4f26-b637-b6f1cad312f3" />
 
-
 An open-source replacement for [Wispr Flow](https://wisprflow.ai/), built around three rules:
 
 1. **100% local by default.** Audio and transcripts never leave your machine unless you explicitly turn on a cloud BYOK provider.
