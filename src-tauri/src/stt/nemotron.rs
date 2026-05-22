@@ -37,9 +37,12 @@ use crate::stt::{SttEngine, SttResult};
 
 /// 16 kHz matches what every sherpa-onnx ASR model we ship expects.
 const NEMOTRON_SAMPLE_RATE: i32 = 16_000;
-/// 80-dim mel filterbank, matches NeMo Cache-Aware FastConformer
-/// preprocessing config.
-const NEMOTRON_FEATURE_DIM: i32 = 80;
+/// 128-dim mel filterbank — matches the value baked into Nemotron's
+/// encoder ONNX metadata (`feat_dim=128`). Parakeet uses 80-dim;
+/// Nemotron's Cache-Aware FastConformer uses 128. Mismatch here
+/// produces a tensor-shape-mismatch foreign exception during the
+/// first decode (caught during 2026-05-21 end-to-end testing).
+const NEMOTRON_FEATURE_DIM: i32 = 128;
 
 pub struct NemotronStreamingSttEngine {
     // The sherpa-onnx C++ recognizer keeps its own per-stream state,
@@ -68,15 +71,11 @@ impl NemotronStreamingSttEngine {
             sample_rate: NEMOTRON_SAMPLE_RATE,
             feature_dim: NEMOTRON_FEATURE_DIM,
             num_threads: num_cpus_clamped(),
-            // Default sherpa-onnx debug ON while we shake out the
-            // online recognizer integration — the C++ stderr is the
-            // only thing that tells us why a `Decode` call threw.
-            // Flip off explicitly with `BOOTHRFLOW_NEMOTRON_DEBUG=off`
-            // once the engine is stable.
-            debug: !matches!(
-                std::env::var("BOOTHRFLOW_NEMOTRON_DEBUG").as_deref(),
-                Ok("off") | Ok("0") | Ok("false")
-            ),
+            // Opt-in C++ stderr noise. Was default-on briefly while
+            // we shook out the FFI shape (caught the feature_dim=80
+            // vs 128 mismatch). Now off by default; set
+            // `BOOTHRFLOW_NEMOTRON_DEBUG=1` if something regresses.
+            debug: std::env::var("BOOTHRFLOW_NEMOTRON_DEBUG").is_ok(),
         };
 
         let name = format!(

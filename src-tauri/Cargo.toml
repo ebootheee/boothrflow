@@ -38,6 +38,15 @@ name = "export_bindings"
 name = "parakeet_probe"
 required-features = ["real-engines", "parakeet-engine"]
 
+# Sister probe for Nemotron Speech Streaming — loads the model from
+# the user data dir, decodes a test wav, prints the transcript. Way
+# faster iteration loop than spinning up Tauri + holding the PTT
+# hotkey when shaking out FFI changes against sherpa-onnx's online
+# recognizer.
+[[example]]
+name = "nemotron_probe"
+required-features = ["real-engines", "parakeet-engine"]
+
 # Replays every captured wav through every available STT/LLM/style
 # config and writes a `<stem>.variants.json` next to each wav. Pair
 # with the grading UI (Wave 7 candidate) to score variants instead
