@@ -122,6 +122,30 @@ const defaultOptions: SettingsOptions = {
       file: null,
       available: true,
     },
+    {
+      value: "qwen3:4b",
+      label: "Qwen 3 4B Instruct (~2.5GB, smaller + better instruction-following than 2.5:7b)",
+      detail:
+        "Survey-recommended swap for the 7B-class slot — smaller model, materially higher IFEval. Use temperature ≤0.2 + Instruct (non-thinking) mode for dictation cleanup.",
+      file: null,
+      available: true,
+    },
+    {
+      value: "qwen3:8b",
+      label: "Qwen 3 8B Instruct (~5.2GB, IFEval 85.0)",
+      detail:
+        "Quality stretch over Qwen 2.5 7B at a similar memory footprint. Slightly slower than 2.5:7b — flip only if tok/s on your machine is at least neutral.",
+      file: null,
+      available: true,
+    },
+    {
+      value: "qwen3:1.7b",
+      label: "Qwen 3 1.7B Instruct (~1.4GB, matches 2.5:3b capability)",
+      detail:
+        "Direct successor to Qwen 2.5 1.5B — same family, slight memory bump, real quality jump on instruction-following.",
+      file: null,
+      available: true,
+    },
   ],
   embed_models: [
     {

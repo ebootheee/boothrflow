@@ -559,6 +559,34 @@ pub fn settings_options() -> SettingsOptions {
                 file: None,
                 available: true,
             },
+            // Qwen3 family — added 2026-05-21 per the model survey. Same
+            // Apache-2.0 license, drop-in chat template. qwen3:4b is the
+            // Pareto-dominant 7B-class swap (smaller than qwen2.5:7b
+            // AND higher IFEval at ~83.4 vs ~76); qwen3:8b is the quality
+            // stretch if tok/s is at least neutral; qwen3:1.7b slots
+            // alongside qwen2.5:1.5b. Default unchanged until bench
+            // grades confirm the swap.
+            ModelOption {
+                value: "qwen3:4b".into(),
+                label: "Qwen 3 4B Instruct (~2.5GB, smaller + better instruction-following than 2.5:7b)".into(),
+                detail: "Survey-recommended swap for the 7B-class slot — smaller model, materially higher IFEval. Use temperature ≤0.2 + Instruct (non-thinking) mode for dictation cleanup.".into(),
+                file: None,
+                available: true,
+            },
+            ModelOption {
+                value: "qwen3:8b".into(),
+                label: "Qwen 3 8B Instruct (~5.2GB, IFEval 85.0)".into(),
+                detail: "Quality stretch over Qwen 2.5 7B at a similar memory footprint. Slightly slower than 2.5:7b — flip only if tok/s on your machine is at least neutral.".into(),
+                file: None,
+                available: true,
+            },
+            ModelOption {
+                value: "qwen3:1.7b".into(),
+                label: "Qwen 3 1.7B Instruct (~1.4GB, matches 2.5:3b capability)".into(),
+                detail: "Direct successor to Qwen 2.5 1.5B — same family, slight memory bump, real quality jump on instruction-following.".into(),
+                file: None,
+                available: true,
+            },
         ],
         embed_models: vec![ModelOption {
             value: "nomic-embed-text".into(),
