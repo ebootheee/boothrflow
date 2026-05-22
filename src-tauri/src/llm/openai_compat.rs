@@ -43,7 +43,15 @@ use crate::settings::LlmSettings;
 
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:11434/v1/chat/completions";
 pub const DEFAULT_MODEL: &str = "qwen2.5:7b";
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Cleanup HTTP timeout. 30 s was tight enough that any cold model
+/// load + long cleanup combined with a hybrid Instruct/Thinking
+/// model's internal reasoning generation would drop the connection
+/// — even with `think: false`, Ollama still produces reasoning
+/// tokens internally for qwen3 hybrid models; the flag only hides
+/// them from the `content` field. 120 s gives headroom for a fresh
+/// Ollama swap (qwen3:8b cold-load is ~12 s) plus a 1500-char
+/// cleanup with hybrid-mode reasoning bookkeeping.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub struct OpenAiCompatLlmCleanup {
     endpoint: String,
@@ -149,6 +157,7 @@ impl OpenAiCompatLlmCleanup {
             temperature: 0.0,
             stream: false,
             keep_alive: self.keep_alive_for_endpoint(),
+            think: false,
         };
         let started = Instant::now();
         let mut req = self.client.post(&self.endpoint).json(&body);
@@ -185,6 +194,18 @@ struct ChatRequest<'a> {
     /// dictations within the keep_alive window.
     #[serde(skip_serializing_if = "str::is_empty")]
     keep_alive: &'a str,
+    /// Ollama-specific extra: disable hybrid Instruct/Thinking mode
+    /// so reasoning tokens don't pollute the cleanup `content` field.
+    /// Required for Qwen3 hybrid models (qwen3:1.7b/4b/8b/etc.) —
+    /// without this they emit raw `<think>...</think>` blocks inside
+    /// the user-visible output AND can spiral into thousands of
+    /// reasoning tokens on long inputs, which times out the cleanup
+    /// HTTP request. With `think: false`, Ollama generates the
+    /// reasoning trace internally and exposes a clean `content` via
+    /// its OpenAI-compat endpoint. Non-Ollama OpenAI-compat servers
+    /// ignore the unknown field (same harmless-extra pattern as
+    /// `keep_alive`).
+    think: bool,
 }
 
 #[derive(Serialize)]
@@ -248,6 +269,7 @@ impl LlmCleanup for OpenAiCompatLlmCleanup {
             temperature: 0.0,
             stream: false,
             keep_alive: self.keep_alive_for_endpoint(),
+            think: false,
         };
 
         let mut req = self.client.post(&self.endpoint).json(&body);

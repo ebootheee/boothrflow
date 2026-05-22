@@ -44,30 +44,59 @@ pub struct CleanupPromptInputs<'a> {
 /// inputs always produce the same output, which is what makes the
 /// prompt-prefix caching layer in the OpenAI-compat client work.
 pub fn build_system_prompt(inputs: &CleanupPromptInputs<'_>) -> String {
-    if matches!(inputs.style, Style::CaptainsLog) {
-        return build_captains_log_prompt();
-    }
+    let mut out = if matches!(inputs.style, Style::CaptainsLog) {
+        build_captains_log_prompt()
+    } else {
+        let mut s = String::with_capacity(2048);
+        s.push_str(&base_system_prompt(inputs.style));
 
-    let mut out = String::with_capacity(2048);
-    out.push_str(&base_system_prompt(inputs.style));
+        let corrections =
+            correction_section(inputs.preferred_transcriptions, inputs.commonly_misheard);
+        if !corrections.is_empty() {
+            s.push_str("\n\n");
+            s.push_str(&corrections);
+        }
 
-    let corrections = correction_section(inputs.preferred_transcriptions, inputs.commonly_misheard);
-    if !corrections.is_empty() {
-        out.push_str("\n\n");
-        out.push_str(&corrections);
-    }
+        if let Some(ctx) = inputs.app_context {
+            s.push_str("\n\n");
+            s.push_str(&app_context_block(ctx));
+        }
 
-    if let Some(ctx) = inputs.app_context {
-        out.push_str("\n\n");
-        out.push_str(&app_context_block(ctx));
-    }
+        if let Some(ocr) = inputs.window_ocr.filter(|s| !s.trim().is_empty()) {
+            s.push_str("\n\n");
+            s.push_str(&ocr_block(ocr));
+        }
+        s
+    };
 
-    if let Some(ocr) = inputs.window_ocr.filter(|s| !s.trim().is_empty()) {
-        out.push_str("\n\n");
-        out.push_str(&ocr_block(ocr));
-    }
-
+    append_hybrid_no_think_directive(&mut out);
     out
+}
+
+/// Append the Qwen3-style `/no_think` control directive to the system
+/// prompt.
+///
+/// Qwen3 hybrid Instruct/Thinking models default to thinking mode,
+/// which on long dictation inputs spirals into tens of thousands of
+/// reasoning tokens before producing any `content` — long enough that
+/// Ollama drops the connection and our cleanup HTTP request fails with
+/// `error sending request for url`. We caught this empirically during
+/// the 2026-05-21 Wave 6 Phase 1 bench: `qwen3:4b` couldn't complete a
+/// single cleanup call on the 204 s investor-letter capture even
+/// though short PTT bursts worked fine.
+///
+/// `/no_think` is Qwen3's canonical control token to suppress
+/// thinking — recognized in either system or user messages. For
+/// non-Qwen3 models (qwen2.5, llama, etc.) it's just unknown text the
+/// model treats as part of the system instructions and ignores; on the
+/// 2026-05-10 graded bench qwen2.5:7b and qwen2.5:1.5b produced
+/// indistinguishable output before vs after this addition.
+///
+/// Re-evaluate this directive once we move the cleanup prompt to the
+/// model-card-aware template path (or pin to the explicit
+/// `*-instruct-2507` non-thinking SKUs if Ollama exposes them).
+fn append_hybrid_no_think_directive(out: &mut String) {
+    out.push_str("\n\n/no_think");
 }
 
 fn base_system_prompt(style: Style) -> String {
