@@ -107,6 +107,17 @@ fn main() {
 struct CliArgs {
     latest_only: bool,
     wav_filter: Option<String>,
+    /// Comma-separated LLM model names. When set, replaces the
+    /// hardcoded LLM candidate list — useful for augment-mode runs
+    /// that only want to add one new model (e.g. `qwen3:4b`) or
+    /// stage a head-to-head between Ollama-stock and an Unsloth
+    /// HF GGUF without re-running everything else.
+    llm_only: Option<Vec<String>>,
+    /// Merge into the existing `<stem>.variants.json` instead of
+    /// overwriting it. Variants whose (engine, llm, style) tuple
+    /// already exists are skipped; new variants append. Combined
+    /// with `--llm-only`, this is the augment workflow.
+    merge: bool,
 }
 
 #[cfg(feature = "real-engines")]
@@ -134,6 +145,23 @@ fn parse_args() -> CliArgs {
                 out.wav_filter = Some(val.clone());
                 i += 2;
             }
+            "--llm-only" => {
+                let Some(val) = raw.get(i + 1) else {
+                    eprintln!("--llm-only requires a value (comma-separated model names)");
+                    std::process::exit(64);
+                };
+                out.llm_only = Some(
+                    val.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect(),
+                );
+                i += 2;
+            }
+            "--merge" => {
+                out.merge = true;
+                i += 1;
+            }
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
@@ -154,13 +182,23 @@ fn parse_args() -> CliArgs {
 
 #[cfg(feature = "real-engines")]
 fn print_help() {
-    eprintln!("bench_replay [--latest | --wav <substring>]");
+    eprintln!("bench_replay [--latest | --wav <substring>] [--llm-only <models>] [--merge]");
     eprintln!();
-    eprintln!("  --latest             only the most recently modified .wav");
-    eprintln!("  --wav <substring>    only wavs whose filename contains <substring>");
-    eprintln!("  -h | --help          print this help");
+    eprintln!("  --latest                 only the most recently modified .wav");
+    eprintln!("  --wav <substring>        only wavs whose filename contains <substring>");
+    eprintln!("  --llm-only <a,b,c>       restrict the LLM fan-out to these models");
+    eprintln!("                           (replaces the hardcoded candidate list)");
+    eprintln!("  --merge                  append to existing <stem>.variants.json,");
+    eprintln!("                           skipping (engine, llm, style) tuples already");
+    eprintln!("                           present. Pair with --llm-only to augment one");
+    eprintln!("                           wav with a new LLM in 1-2 min instead of");
+    eprintln!("                           re-running the full matrix.");
+    eprintln!("  -h | --help              print this help");
     eprintln!();
-    eprintln!("Default (no flags): bench every .wav in the captures dir.");
+    eprintln!("Default (no flags): bench every .wav in the captures dir, fresh write.");
+    eprintln!();
+    eprintln!("Example: bench just qwen3:4b on the latest wav, merge:");
+    eprintln!("  pnpm bench:replay -- --latest --llm-only qwen3:4b --merge");
 }
 
 #[cfg(feature = "real-engines")]
@@ -257,17 +295,36 @@ fn main() -> Result<()> {
     // neutral" data point. qwen3:1.7b sits in the 1.5B-class slot.
     // Unavailable models (e.g. `ollama pull` not run yet) are skipped
     // by the per-model handshake below — no need to gate here.
-    let mut llm_candidates: Vec<String> = vec![configured_model.clone()];
-    for extra in [
-        "qwen2.5:7b",
-        "qwen2.5:1.5b",
-        "qwen3:4b",
-        "qwen3:8b",
-        "qwen3:1.7b",
-    ] {
-        if !llm_candidates.iter().any(|m| m == extra) {
-            llm_candidates.push(extra.to_string());
+    //
+    // `--llm-only <a,b,c>` overrides this list entirely — useful for
+    // augment runs that just want to add a new model (e.g. qwen3:4b)
+    // to an existing variants.json, or for staging a head-to-head
+    // between Ollama-stock and an Unsloth HF GGUF.
+    let mut llm_candidates: Vec<String> = if let Some(only) = &args.llm_only {
+        only.clone()
+    } else {
+        let mut c = vec![configured_model.clone()];
+        for extra in [
+            "qwen2.5:7b",
+            "qwen2.5:1.5b",
+            "qwen3:4b",
+            "qwen3:8b",
+            "qwen3:1.7b",
+        ] {
+            if !c.iter().any(|m| m == extra) {
+                c.push(extra.to_string());
+            }
         }
+        c
+    };
+    if args.llm_only.is_some() && llm_candidates.is_empty() {
+        eprintln!("--llm-only resolved to an empty list");
+        std::process::exit(64);
+    }
+    // Dedupe in case the user passed duplicates in --llm-only.
+    {
+        let mut seen = std::collections::HashSet::new();
+        llm_candidates.retain(|m| seen.insert(m.clone()));
     }
     let mut llm_clients: Vec<(String, OpenAiCompatLlmCleanup)> = Vec::new();
     for model in &llm_candidates {
@@ -321,8 +378,84 @@ fn main() -> Result<()> {
         let audio_seconds = audio.len() as f32 / 16_000.0;
         eprintln!("  audio: {} samples, {:.2}s", audio.len(), audio_seconds);
 
-        let mut variants = Vec::new();
+        // Merge mode — read existing variants.json so the (engine,
+        // llm, style) tuples already present can be skipped this run.
+        // Existing variants ride along into the final write so the
+        // resulting file is union(existing, new).
+        let (mut variants, existing_tuples): (Vec<Variant>, std::collections::HashSet<(String, String, String)>) =
+            if args.merge {
+                match fs::read(&variants_path) {
+                    Ok(bytes) => match serde_json::from_slice::<VariantsFile>(&bytes) {
+                        Ok(f) => {
+                            let tuples = f
+                                .variants
+                                .iter()
+                                .map(|v| (v.engine.clone(), v.llm_model.clone(), v.style.clone()))
+                                .collect();
+                            eprintln!(
+                                "  merge: loaded {} existing variant(s) from {}",
+                                f.variants.len(),
+                                variants_path.display()
+                            );
+                            (f.variants, tuples)
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "  merge: existing {} couldn't be parsed ({e}); starting fresh",
+                                variants_path.display()
+                            );
+                            (Vec::new(), std::collections::HashSet::new())
+                        }
+                    },
+                    Err(_) => {
+                        eprintln!(
+                            "  merge: no existing {} to merge into; starting fresh",
+                            variants_path.display()
+                        );
+                        (Vec::new(), std::collections::HashSet::new())
+                    }
+                }
+            } else {
+                (Vec::new(), std::collections::HashSet::new())
+            };
+
         for stt_config in &stt_configs {
+            // Pre-check: would EVERY (engine × llm × style) tuple this
+            // engine would produce already be in `existing_tuples`? If
+            // so, skip the engine load + warmup + STT decode entirely.
+            // Saves the dominant cost (Nemotron warmup is ~3s, Parakeet
+            // ~2s) when merging just one new LLM into a fully-populated
+            // existing file.
+            if args.merge {
+                let mut would_add: Vec<(String, String, String)> = Vec::new();
+                for (style_name, style) in &styles {
+                    if matches!(style, Style::Raw) {
+                        would_add.push((
+                            stt_config.engine_label.clone(),
+                            "(none)".to_string(),
+                            (*style_name).to_string(),
+                        ));
+                    } else {
+                        for (llm_model_name, _) in &llm_clients {
+                            would_add.push((
+                                stt_config.engine_label.clone(),
+                                llm_model_name.clone(),
+                                (*style_name).to_string(),
+                            ));
+                        }
+                    }
+                }
+                if !would_add.is_empty()
+                    && would_add.iter().all(|t| existing_tuples.contains(t))
+                {
+                    eprintln!(
+                        "  ↳ {} (all variants already present, skipping engine)",
+                        stt_config.engine_label
+                    );
+                    continue;
+                }
+            }
+
             eprintln!("  ↳ {}", stt_config.engine_label);
 
             // Load engine once. Warmup pass + timed pass share the same
@@ -370,6 +503,15 @@ fn main() -> Result<()> {
                 if matches!(style, Style::Raw) {
                     // Raw doesn't touch the LLM — emit one variant per STT,
                     // not one per (STT × LLM).
+                    let tuple = (
+                        stt_config.engine_label.clone(),
+                        "(none)".to_string(),
+                        (*style_name).to_string(),
+                    );
+                    if existing_tuples.contains(&tuple) {
+                        eprintln!("    → {} (already in merge target, skipping)", style_name);
+                        continue;
+                    }
                     let config_id =
                         format!("{} + (no llm) + {}", stt_config.engine_label, style_name);
                     eprintln!("    → {} → {}", style_name, preview(&raw, 80));
@@ -389,6 +531,18 @@ fn main() -> Result<()> {
                     continue;
                 }
                 for (llm_model_name, llm) in &llm_clients {
+                    let tuple = (
+                        stt_config.engine_label.clone(),
+                        llm_model_name.clone(),
+                        (*style_name).to_string(),
+                    );
+                    if existing_tuples.contains(&tuple) {
+                        eprintln!(
+                            "    → {} + {} (already in merge target, skipping)",
+                            llm_model_name, style_name
+                        );
+                        continue;
+                    }
                     let formatted_started = Instant::now();
                     let formatted = match llm.cleanup(CleanupRequest {
                         raw_text: &raw,
