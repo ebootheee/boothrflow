@@ -625,6 +625,24 @@ pub fn whisper_models() -> Vec<WhisperModel> {
             detail: "Faster than Whisper but trips on pronouns and short function words on multi-sentence dictations. No live preview while talking. English only.",
             download_arg: "parakeet",
         },
+        // NVIDIA Nemotron Speech Streaming en-0.6B — cache-aware
+        // FastConformer-RNNT. The streaming graph is wired through
+        // `stt::online_transducer` (FFI over sherpa-onnx's online
+        // recognizer); production hot-path streaming (chunked
+        // accept_waveform + partial polling) is not yet exposed, so
+        // the pill behaves like Parakeet in selection mode for now —
+        // final transcript on release. Wave 6 Phase 1.5 wires true
+        // live preview. LibriSpeech 2.32 / 4.84 WER at the 1120 ms
+        // chunk. License: NVIDIA Open Model License (commercial OK,
+        // not Apache/MIT — note in NOTICE when this becomes default).
+        WhisperModel {
+            value: "nemotron-speech-streaming-en-0.6b",
+            file: "nemotron-speech-streaming-en-0.6b",
+            available: cfg!(feature = "parakeet-engine"),
+            label: "NVIDIA Nemotron Speech Streaming 0.6B — final transcript only (Wave 6 Phase 1)",
+            detail: "Cache-aware FastConformer-RNNT. Better LibriSpeech WER than whisper-base and natively streaming-capable, though live preview isn't wired yet (Wave 6 Phase 1.5). English only.",
+            download_arg: "nemotron",
+        },
     ]
 }
 

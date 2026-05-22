@@ -912,7 +912,9 @@
         >
           <div class="settings-titlebar">
             <div>
-              <span class="section-kicker">Wave 4B</span>
+              <span class="section-kicker">
+                {appVersion ? `v${appVersion}` : "boothrflow"}
+              </span>
               <h2 id="settings-heading">Settings</h2>
             </div>
             <div class="settings-status">

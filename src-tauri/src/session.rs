@@ -47,14 +47,19 @@ mod real {
     use crate::tray;
 
     /// STT engine selected at runtime. Wave 5c added Parakeet alongside
-    /// the existing Whisper path; the variant determines which
-    /// `transcribe()` impl runs and whether the streaming partial
-    /// pipeline can be wired (whisper-only today — Parakeet streaming
-    /// is a Wave 5d enhancement against `stt::streaming::LocalAgreement2`).
+    /// the existing Whisper path; Wave 6 Phase 1 added Nemotron Speech
+    /// Streaming via the same sherpa-onnx-backed `parakeet-engine` Cargo
+    /// feature. The variant determines which `transcribe()` impl runs
+    /// and whether the streaming partial pipeline can be wired —
+    /// today only Whisper feeds `stt::streaming::LocalAgreement2`.
+    /// Nemotron streaming has the underlying native-chunk API but the
+    /// production hot-path integration is Wave 6 Phase 1.5.
     enum LoadedStt {
         Whisper(WhisperSttEngine),
         #[cfg(feature = "parakeet-engine")]
         Parakeet(crate::stt::ParakeetSttEngine),
+        #[cfg(feature = "parakeet-engine")]
+        Nemotron(crate::stt::NemotronStreamingSttEngine),
     }
 
     impl LoadedStt {
@@ -63,18 +68,22 @@ mod real {
                 Self::Whisper(e) => e.transcribe(audio),
                 #[cfg(feature = "parakeet-engine")]
                 Self::Parakeet(e) => e.transcribe(audio),
+                #[cfg(feature = "parakeet-engine")]
+                Self::Nemotron(e) => e.transcribe(audio),
             }
         }
 
         /// Whisper-typed handle, for streaming partials. Returns `None`
-        /// when Parakeet (or any future non-streaming engine) is the
-        /// active variant — the session loop interprets that as
+        /// when Parakeet / Nemotron (or any future non-Whisper engine)
+        /// is the active variant — the session loop interprets that as
         /// "no partials this dictation".
         fn as_whisper(&self) -> Option<&WhisperSttEngine> {
             match self {
                 Self::Whisper(e) => Some(e),
                 #[cfg(feature = "parakeet-engine")]
                 Self::Parakeet(_) => None,
+                #[cfg(feature = "parakeet-engine")]
+                Self::Nemotron(_) => None,
             }
         }
 
@@ -84,6 +93,8 @@ mod real {
                 Self::Whisper(e) => e.name(),
                 #[cfg(feature = "parakeet-engine")]
                 Self::Parakeet(e) => e.name(),
+                #[cfg(feature = "parakeet-engine")]
+                Self::Nemotron(e) => e.name(),
             }
         }
     }
@@ -419,6 +430,33 @@ mod real {
             #[cfg(not(feature = "parakeet-engine"))]
             {
                 let msg = "Parakeet selected but binary built without `parakeet-engine` feature";
+                tracing::warn!("{msg}");
+                let _ = app.emit("dictation:model-missing", msg);
+                return;
+            }
+        }
+
+        if model_value == "nemotron-speech-streaming-en-0.6b" {
+            #[cfg(feature = "parakeet-engine")]
+            {
+                let dir = models_dir.join(&model_file);
+                match crate::stt::NemotronStreamingSttEngine::from_model_dir(&dir) {
+                    Ok(engine) => {
+                        tracing::info!("nemotron: loaded from {}", dir.display());
+                        *stt = Some(LoadedStt::Nemotron(engine));
+                        *loaded_model_file = Some(model_file);
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("nemotron not available: {e}");
+                        let _ = app.emit("dictation:model-missing", e.to_string());
+                        return;
+                    }
+                }
+            }
+            #[cfg(not(feature = "parakeet-engine"))]
+            {
+                let msg = "Nemotron selected but binary built without `parakeet-engine` feature";
                 tracing::warn!("{msg}");
                 let _ = app.emit("dictation:model-missing", msg);
                 return;
