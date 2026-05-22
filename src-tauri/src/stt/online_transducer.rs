@@ -28,6 +28,7 @@
 use std::ffi::{CStr, CString};
 use std::mem;
 use std::os::raw::c_char;
+use std::ptr;
 
 use sherpa_rs_sys as sys;
 
@@ -72,15 +73,23 @@ impl OnlineTransducerRecognizer {
         // Hardcoded strings; CString::new on a bare literal can't fail.
         let provider = CString::new("cpu").expect("provider");
         let decoding = CString::new("greedy_search").expect("decoding");
-        let empty = CString::new("").expect("empty");
 
         // SAFETY: every nullable / "unused" struct field is filled with
         // zeroed memory of its declared type. The C side checks pointers
         // against NULL before dereferencing, and reads ints/floats as
         // their natural zero default (disabled / unused). The pointers
         // we DO populate (encoder/decoder/joiner/tokens/provider/
-        // decoding/empty for required string slots) are owned by the
-        // CStrings we stash in `_strings` for the recognizer's lifetime.
+        // decoding for required string slots) are owned by the CStrings
+        // we stash in `_strings` for the recognizer's lifetime.
+        //
+        // Critical detail learned from a foreign-exception abort during
+        // the first transcribe attempt: optional string fields must be
+        // **NULL**, not pointers to empty C strings. The reference
+        // sherpa-onnx example (`c-api-examples/decode-file-c-api.c`)
+        // does `memset(&config, 0, sizeof(config))` and leaves them
+        // zeroed. Pointing them at `c""` instead made the C++ side
+        // dispatch into a model-type-matching path that didn't accept
+        // the empty literal, which threw across the FFI.
         let model_config = unsafe {
             sys::SherpaOnnxOnlineModelConfig {
                 transducer: sys::SherpaOnnxOnlineTransducerModelConfig {
@@ -95,13 +104,14 @@ impl OnlineTransducerRecognizer {
                 num_threads: config.num_threads,
                 provider: provider.as_ptr(),
                 debug: i32::from(config.debug),
-                // Leave model_type empty so sherpa-onnx auto-detects
-                // from encoder ONNX metadata. Setting it explicitly
-                // sends the C++ side down the wrong loader path.
-                model_type: empty.as_ptr(),
-                modeling_unit: empty.as_ptr(),
-                bpe_vocab: empty.as_ptr(),
-                tokens_buf: mem::zeroed::<_>(),
+                // NULL out the optional string fields so sherpa-onnx
+                // auto-detects model_type from encoder ONNX metadata
+                // and skips the modeling-unit / bpe-vocab / tokens-buf
+                // code paths entirely.
+                model_type: ptr::null(),
+                modeling_unit: ptr::null(),
+                bpe_vocab: ptr::null(),
+                tokens_buf: ptr::null(),
                 tokens_buf_size: 0,
             }
         };
@@ -121,13 +131,13 @@ impl OnlineTransducerRecognizer {
                 rule1_min_trailing_silence: 0.0,
                 rule2_min_trailing_silence: 0.0,
                 rule3_min_utterance_length: 0.0,
-                hotwords_file: empty.as_ptr(),
+                hotwords_file: ptr::null(),
                 hotwords_score: 0.0,
                 ctc_fst_decoder_config: mem::zeroed::<_>(),
-                rule_fsts: empty.as_ptr(),
-                rule_fars: empty.as_ptr(),
+                rule_fsts: ptr::null(),
+                rule_fars: ptr::null(),
                 blank_penalty: 0.0,
-                hotwords_buf: mem::zeroed::<_>(),
+                hotwords_buf: ptr::null(),
                 hotwords_buf_size: 0,
                 hr: mem::zeroed::<_>(),
             }
@@ -143,7 +153,7 @@ impl OnlineTransducerRecognizer {
         Ok(Self {
             recognizer,
             name,
-            _strings: vec![encoder, decoder, joiner, tokens, provider, decoding, empty],
+            _strings: vec![encoder, decoder, joiner, tokens, provider, decoding],
         })
     }
 
