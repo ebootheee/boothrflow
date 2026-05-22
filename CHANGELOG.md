@@ -4,6 +4,36 @@ User-facing changes per session, most recent at the top. Engineering
 detail and rationale lives in commits + the per-wave docs under
 `docs/waves/`. This file is for humans skimming "what shipped".
 
+## 2026-05-21 (evening) — Wave 6 Phase 1 bench verdict: no swaps
+
+### Decision
+
+After Nemotron streaming engine + Qwen3 LLM family landed in the bench grader (earlier today), ran the full fan-out on the 2026-05-10 204 s technical-monologue capture. **No defaults are swapping.** See [`docs/benchmarks/wave-6-phase-1-2026-05-21.md`](./docs/benchmarks/wave-6-phase-1-2026-05-21.md) for the full report with numbers, transcript samples, and per-axis grades.
+
+### Why no swaps
+
+- **STT default stays `whisper:base.en`.** Fastest on M4 Max (Metal-accelerated 1.4 s decode, 142× real-time) and best raw transcript quality on this content. Parakeet is 12× slower with marginally different proper-noun errors (keep as alternate). Nemotron is 17× slower **and** materially worse on OOV-heavy content (model card warned about this: "not recommended for word-for-word / incomplete sentences"). The streaming-partial benefit Nemotron offers can't be measured in batch decode — that's gated on Wave 6 Phase 1.5 wiring chunked partial polling in the production hot path.
+- **LLM 7B-class stays `qwen2.5:7b`.** qwen3:8b is 2.6× slower at median (30.9 s vs 12.0 s) and over-edits on Light (drops "If you go and read…", capitalizes "Shade CN" → that should stay lowercase per the dictation). qwen3:4b is 9.4× slower **and** fails 7/8 attempts under bench load — Ollama drops connections during back-to-back model swaps when 3+ Qwen3 SKUs are resident in VRAM alongside the STT models. Direct curl with the same payload works in 25 s, so the model is healthy; the bench scenario specifically is the failure trigger.
+- **LLM 1.5B-class stays `qwen2.5:1.5b`.** qwen3:1.7b is 2× slower **and** adds "The cleaned text is as follows:" preambles + rewrites first-person intent ("I want to turn this MCP into") into third-person directives ("The MCP should be updated to") — violates Light style's "no preambles, no paraphrasing" rules. Same "executes meta-instructions" failure axis that retired Assertive style on 2026-05-10.
+
+### Fixes that made the comparison fair
+
+The first bench round caught a procedural issue: Qwen3 hybrid Instruct/Thinking models default to thinking-mode, which on long inputs spirals into reasoning tokens that either timeout the cleanup HTTP request OR leak `<think>...</think>` blocks into `content`. Three changes brought the comparison up to spec:
+
+- **`/no_think` directive appended to the cleanup system prompt** (`build_system_prompt` in `src-tauri/src/llm/prompt.rs`). Canonical Qwen3 control token. Ignored by qwen2.5 / llama / other models (treated as instruction-text noise; verified the 15 existing prompt unit tests still pass).
+- **`"think": false` sent in the chat-completion request body** (`ChatRequest` in `src-tauri/src/llm/openai_compat.rs`). Ollama-specific extension to the OpenAI-compat API: reasoning trace goes to a separate `reasoning` response field instead of polluting `content`. Non-Ollama OpenAI-compat servers ignore the unknown field.
+- **Cleanup HTTP timeout bumped from 30 s to 120 s.** With `think: false`, Qwen3 hybrid models STILL generate reasoning internally — Ollama just hides them from `content`. On a 1500-char cleanup, total response time including reasoning bookkeeping can exceed 30 s even when the visible output is short. The 30 s timeout was dropping connections mid-flight on every long-input qwen3:4b call.
+
+### Category-level finding worth keeping
+
+**Hybrid Instruct/Thinking models are a 2-3× latency tax in our pipeline regardless of how thinking is "suppressed."** `think: false` only changes where reasoning lands, not whether it happens. For mechanical text transformation tasks (drop disfluencies, add punctuation, paragraph breaks), Qwen3's reasoning is pure overhead — no IFEval lift makes that worth eating in a tight real-time loop. Until Ollama ships explicit non-thinking SKUs for the Qwen3 family (e.g. `qwen3:4b-instruct-2507-nothink`), Qwen3 is unlikely to win the LLM default slot in this pipeline.
+
+The model survey's IFEval-based prediction (qwen3:4b Pareto-dominates) was wrong because IFEval scores don't capture either (a) the thinking-mode latency overhead or (b) the small-model meta-instruction-execution failure mode.
+
+### Tooling that landed alongside
+
+- `bench_replay` got `--llm-only <model[,model...]>` and `--merge` flags (commit `58bfde8`) so swap-evaluation iterations don't have to re-run the full matrix every time. `pnpm bench:replay -- --wav <substr> --llm-only qwen3:4b --merge` augments an existing `variants.json` with just the missing rows in 1-2 minutes instead of 15.
+
 ## 2026-05-21 (later) — Bench harness gets Nemotron streaming + Qwen3 LLM rows
 
 ### Added
