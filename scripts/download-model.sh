@@ -118,6 +118,12 @@ fi
 # 600M params, native streaming at 80/160/560/1120 ms chunks.
 # License: NVIDIA Open Model License (commercial OK, not Apache/MIT;
 # see NOTICE).
+#
+# csukuangfj's HF repos for this model ship the int8 ONNX files as
+# individual LFS blobs (no tarball), under
+# `encoder.int8.onnx` / `decoder.int8.onnx` / `joiner.int8.onnx` /
+# `tokens.txt`. We pull each file directly and normalize to the
+# four plain names the engine expects.
 if [[ "${arg}" == "nemotron" ]]; then
   bundle_dir="${dest_dir}/nemotron-speech-streaming-en-0.6b"
   if [[ -f "${bundle_dir}/encoder.onnx" ]]; then
@@ -127,43 +133,38 @@ if [[ "${arg}" == "nemotron" ]]; then
   fi
 
   bundle_name="sherpa-onnx-nemotron-speech-streaming-en-0.6b-int8-2026-01-14"
-  url="https://huggingface.co/csukuangfj/${bundle_name}/resolve/main/${bundle_name}.tar.bz2"
-  archive="${dest_dir}/${bundle_name}.tar.bz2"
+  base_url="https://huggingface.co/csukuangfj/${bundle_name}/resolve/main"
 
-  echo "Downloading Nemotron streaming bundle (~150 MB int8) to ${archive} ..."
-  if ! curl -L --fail -o "${archive}" "${url}"; then
-    echo "error: download failed. The published bundle name or path may have changed."
-    echo "Check https://huggingface.co/csukuangfj for the current Nemotron streaming graph."
-    rm -f "${archive}"
-    exit 1
-  fi
-
-  echo "Extracting bundle ..."
-  tar -xjf "${archive}" -C "${dest_dir}"
-  rm "${archive}"
-
-  src_dir="${dest_dir}/${bundle_name}"
-  if [[ ! -d "${src_dir}" ]]; then
-    echo "error: extracted directory ${src_dir} not found" >&2
-    exit 1
-  fi
   mkdir -p "${bundle_dir}"
-  # Bundle ships with int8-quantized variants under stable names —
-  # normalize to the four files the engine expects. Fall back to the
-  # plain (non-int8) names if the int8 variants aren't present so the
-  # script still works if csukuangfj's archive layout shifts.
-  for f in encoder decoder joiner; do
-    if [[ -f "${src_dir}/${f}.int8.onnx" ]]; then
-      cp "${src_dir}/${f}.int8.onnx" "${bundle_dir}/${f}.onnx"
-    elif [[ -f "${src_dir}/${f}.onnx" ]]; then
-      cp "${src_dir}/${f}.onnx" "${bundle_dir}/${f}.onnx"
-    else
-      echo "error: ${f} ONNX file missing from extracted bundle" >&2
+
+  echo "Downloading Nemotron streaming bundle (~660 MB int8) to ${bundle_dir} ..."
+  echo "  (encoder.int8.onnx is ~650 MB on its own; the int8 label refers to"
+  echo "   weight quantization, not file size — plan for the disk + bandwidth.)"
+  echo
+
+  # name in repo → name on disk (engine expects plain {encoder,decoder,joiner}.onnx)
+  declare -a files=(
+    "encoder.int8.onnx:encoder.onnx"
+    "decoder.int8.onnx:decoder.onnx"
+    "joiner.int8.onnx:joiner.onnx"
+    "tokens.txt:tokens.txt"
+  )
+
+  for pair in "${files[@]}"; do
+    src="${pair%%:*}"
+    dst="${pair##*:}"
+    out="${bundle_dir}/${dst}"
+    echo "  → ${src}"
+    if ! curl -L --fail --progress-bar -o "${out}.partial" "${base_url}/${src}"; then
+      echo
+      echo "error: download of ${src} failed."
+      echo "Check https://huggingface.co/csukuangfj/${bundle_name} — the"
+      echo "filename or repo may have changed since this script was written."
+      rm -f "${out}.partial"
       exit 1
     fi
+    mv "${out}.partial" "${out}"
   done
-  cp "${src_dir}/tokens.txt" "${bundle_dir}/tokens.txt"
-  rm -rf "${src_dir}"
 
   echo
   echo "done. Nemotron streaming model installed at ${bundle_dir}"
