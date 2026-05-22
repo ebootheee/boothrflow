@@ -1,7 +1,7 @@
 # boothrflow
 
 > Local-first voice dictation. Push-to-talk, transcribe, paste anywhere. All on your machine.
-> <img width="2134" height="1546" alt="image" src="https://github.com/user-attachments/assets/f84cb0b5-55e9-4f26-b637-b6f1cad312f3" />
+> <img width="2134" height="1546" alt="boothr" src="https://github.com/user-attachments/assets/2f9ccb96-be06-4499-96ac-35023913621d" />
 
 An open-source replacement for [Wispr Flow](https://wisprflow.ai/), built around three rules:
 
@@ -82,7 +82,7 @@ Open quick-paste with `Ctrl + Option + H`. _(The legacy default
 system-wide "Hide app" shortcut and macOS intercepts it before our
 hotkey listener can see it.)_
 
-## Try it (Windows, ~5 min setup)
+## Try it (Windows, ~5 min setup) - note: I've been pretty lazy on testing this, and have an above average setup -- mileage may vary.
 
 ```powershell
 # 1. Install dev dependencies (one-time)
