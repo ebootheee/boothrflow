@@ -68,7 +68,15 @@ impl NemotronStreamingSttEngine {
             sample_rate: NEMOTRON_SAMPLE_RATE,
             feature_dim: NEMOTRON_FEATURE_DIM,
             num_threads: num_cpus_clamped(),
-            debug: std::env::var("BOOTHRFLOW_NEMOTRON_DEBUG").is_ok(),
+            // Default sherpa-onnx debug ON while we shake out the
+            // online recognizer integration — the C++ stderr is the
+            // only thing that tells us why a `Decode` call threw.
+            // Flip off explicitly with `BOOTHRFLOW_NEMOTRON_DEBUG=off`
+            // once the engine is stable.
+            debug: !matches!(
+                std::env::var("BOOTHRFLOW_NEMOTRON_DEBUG").as_deref(),
+                Ok("off") | Ok("0") | Ok("false")
+            ),
         };
 
         let name = format!(

@@ -157,9 +157,20 @@ impl OnlineTransducerRecognizer {
         })
     }
 
-    /// Transcribe a whole utterance buffer. Creates a per-call stream,
-    /// feeds the audio in one shot, signals input-finished, drains
-    /// pending decode steps, reads the result, destroys the stream.
+    /// Transcribe a whole utterance buffer using the chunked-feed
+    /// pattern from sherpa-onnx's reference example
+    /// (`c-api-examples/decode-file-c-api.c`).
+    ///
+    /// Cache-aware FastConformer-RNNT (Nemotron) is trained with a
+    /// fixed chunk shape and carries encoder state across chunks via
+    /// its cache tensors. The first cut of this method fed the entire
+    /// audio buffer in a single `AcceptWaveform` call and then drained
+    /// — that pattern crashed the C++ side with a foreign exception
+    /// abort on the first real dictation, even on a 2.25 s buffer. The
+    /// reference example feeds 0.2 s chunks, runs the decode loop
+    /// after each chunk, pads the end with 1 s of silence so the
+    /// streaming model can flush its tail state, then signals
+    /// input-finished and drains. Mirror exactly that.
     ///
     /// `audio` must be 16 kHz mono f32 PCM in [-1.0, 1.0]. The
     /// recognizer is `Send + Sync` (we serialize streams behind a
@@ -167,12 +178,23 @@ impl OnlineTransducerRecognizer {
     /// stream is single-threaded by construction — we create and
     /// destroy it within this call.
     pub fn transcribe(&self, sample_rate: u32, audio: &[f32]) -> Result<String> {
+        // 0.2 s at 16 kHz — exact chunk size used by the reference
+        // C example. Big enough to amortize FFI overhead, small
+        // enough to stay inside any cache-aware streaming model's
+        // expected chunk envelope.
+        const CHUNK_SAMPLES: usize = 3200;
+        // 1 s of trailing silence. Streaming models won't emit the
+        // final tokens without enough trailing audio to trigger the
+        // "no more speech" path, even with InputFinished — the C
+        // example pads the same amount.
+        const TAIL_PADDING_SAMPLES: usize = 16_000;
+
         // SAFETY: every pointer crossing the FFI here is either a
-        // freshly-created stream (checked for null on creation) or the
-        // recognizer pointer we keep valid for our entire lifetime.
-        // The audio slice is borrowed for the duration of the
-        // `AcceptWaveform` call only; sherpa-onnx copies samples into
-        // its internal buffer.
+        // freshly-created stream (checked for null on creation) or
+        // the recognizer pointer we keep valid for our entire
+        // lifetime. The audio + tail-padding slices are borrowed for
+        // the duration of each `AcceptWaveform` call only; sherpa-onnx
+        // copies samples into its internal buffer.
         unsafe {
             let stream = sys::SherpaOnnxCreateOnlineStream(self.recognizer);
             if stream.is_null() {
@@ -181,18 +203,37 @@ impl OnlineTransducerRecognizer {
                 ));
             }
 
+            // Feed in CHUNK_SAMPLES windows; decode after each so the
+            // streaming model's cache rolls forward in lockstep with
+            // the audio.
+            let sr = sample_rate as i32;
+            let mut k: usize = 0;
+            while k < audio.len() {
+                let end = (k + CHUNK_SAMPLES).min(audio.len());
+                let slice = &audio[k..end];
+                sys::SherpaOnnxOnlineStreamAcceptWaveform(
+                    stream,
+                    sr,
+                    slice.as_ptr(),
+                    slice.len() as i32,
+                );
+                while sys::SherpaOnnxIsOnlineStreamReady(self.recognizer, stream) != 0 {
+                    sys::SherpaOnnxDecodeOnlineStream(self.recognizer, stream);
+                }
+                k = end;
+            }
+
+            // Tail padding — 1 s of zeros so the model can flush its
+            // final state without us holding a recording-side mic for
+            // an extra second.
+            let tail = vec![0.0_f32; TAIL_PADDING_SAMPLES];
             sys::SherpaOnnxOnlineStreamAcceptWaveform(
                 stream,
-                sample_rate as i32,
-                audio.as_ptr(),
-                audio.len() as i32,
+                sr,
+                tail.as_ptr(),
+                tail.len() as i32,
             );
             sys::SherpaOnnxOnlineStreamInputFinished(stream);
-
-            // Drain. `IsOnlineStreamReady` returns non-zero while there
-            // are more frames to consume from the cache; `Decode` runs
-            // one chunk. For a finite utterance this terminates after
-            // a small bounded number of iterations.
             while sys::SherpaOnnxIsOnlineStreamReady(self.recognizer, stream) != 0 {
                 sys::SherpaOnnxDecodeOnlineStream(self.recognizer, stream);
             }
